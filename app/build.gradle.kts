@@ -53,12 +53,10 @@ android {
 }
 
 dependencies {
-    // AndroidX Core
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
     
-    // Jetpack Compose
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
@@ -70,16 +68,18 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     debugImplementation(libs.androidx.compose.ui.tooling)
     
-    // Coroutines
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
     
-    // RunAnywhere SDK
     implementation(libs.runanywhere.sdk)
     implementation(libs.runanywhere.llamacpp)
     implementation(libs.runanywhere.onnx)
     
-    // Testing
+    implementation(libs.coil.compose)
+    
+    implementation(libs.richtext.commonmark)
+    implementation(libs.richtext.ui.material3)
+    
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

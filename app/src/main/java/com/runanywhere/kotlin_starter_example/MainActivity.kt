@@ -17,6 +17,8 @@ import com.runanywhere.kotlin_starter_example.ui.screens.TextToSpeechScreen
 import com.runanywhere.kotlin_starter_example.ui.screens.ToolCallingScreen
 import com.runanywhere.kotlin_starter_example.ui.screens.VisionScreen
 import com.runanywhere.kotlin_starter_example.ui.screens.VoicePipelineScreen
+import com.runanywhere.kotlin_starter_example.ui.screens.algsoch.AlgsochScreen
+import com.runanywhere.kotlin_starter_example.ui.screens.algsoch.AlgsochModeSelectionScreen
 import com.runanywhere.kotlin_starter_example.ui.theme.KotlinStarterTheme
 import android.util.Log
 import com.runanywhere.sdk.core.onnx.ONNX
@@ -71,10 +73,25 @@ fun RunAnywhereApp() {
     
     NavHost(
         navController = navController,
-        startDestination = "home"
+        startDestination = "algsoch_mode_select"  // Start with mode selection
     ) {
+        composable("algsoch_mode_select") {
+            AlgsochModeSelectionScreen(
+                onChatSelected = { navController.navigate("algsoch") },
+                onVoiceSelected = { navController.navigate("voice_pipeline") },
+                onVisionSelected = { navController.navigate("vision") }
+            )
+        }
+        
+        composable("algsoch") {
+            AlgsochScreen(
+                onNavigateBack = { navController.navigate("algsoch_mode_select") },
+                modelService = modelService
+            )
+        }
         composable("home") {
             HomeScreen(
+                onNavigateToAlgsoch = { navController.navigate("algsoch_mode_select") },
                 onNavigateToChat = { navController.navigate("chat") },
                 onNavigateToSTT = { navController.navigate("stt") },
                 onNavigateToTTS = { navController.navigate("tts") },

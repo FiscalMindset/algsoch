@@ -179,23 +179,43 @@ class ModelService : ViewModel() {
             try {
                 errorMessage = null
                 
-                // Check if already downloaded
                 if (!isModelDownloaded(LLM_MODEL_ID)) {
                     isLLMDownloading = true
                     llmDownloadProgress = 0f
                     
-                    RunAnywhere.downloadModel(LLM_MODEL_ID)
-                        .catch { e ->
-                            errorMessage = "LLM download failed: ${e.message}"
-                        }
-                        .collect { progress ->
-                            llmDownloadProgress = progress.progress
-                        }
+                    var retryCount = 0
+                    val maxRetries = 3
                     
+                    while (retryCount < maxRetries && llmDownloadProgress < 0.99f) {
+                        try {
+                            RunAnywhere.downloadModel(LLM_MODEL_ID)
+                                .catch { e ->
+                                    if (retryCount < maxRetries - 1) {
+                                        errorMessage = "Retrying download... (Attempt ${retryCount + 2}/$maxRetries)"
+                                    } else {
+                                        errorMessage = "Download failed: ${e.message}"
+                                    }
+                                }
+                                .collect { progress ->
+                                    if (progress.progress >= llmDownloadProgress) {
+                                        llmDownloadProgress = progress.progress.coerceIn(0f, 1f)
+                                    }
+                                }
+                            
+                            if (llmDownloadProgress >= 0.99f) break
+                        } catch (e: Exception) {
+                            errorMessage = "Download error: ${e.message}"
+                        }
+                        
+                        retryCount++
+                        if (retryCount < maxRetries && llmDownloadProgress < 0.99f) {
+                            kotlinx.coroutines.delay(500)
+                        }
+                    }
+
                     isLLMDownloading = false
                 }
                 
-                // Load the model
                 isLLMLoading = true
                 RunAnywhere.loadLLMModel(LLM_MODEL_ID)
                 isLLMLoaded = true
@@ -220,23 +240,43 @@ class ModelService : ViewModel() {
             try {
                 errorMessage = null
                 
-                // Check if already downloaded
                 if (!isModelDownloaded(STT_MODEL_ID)) {
                     isSTTDownloading = true
                     sttDownloadProgress = 0f
                     
-                    RunAnywhere.downloadModel(STT_MODEL_ID)
-                        .catch { e ->
-                            errorMessage = "STT download failed: ${e.message}"
+                    var retryCount = 0
+                    val maxRetries = 3
+                    
+                    while (retryCount < maxRetries && sttDownloadProgress < 0.99f) {
+                        try {
+                            RunAnywhere.downloadModel(STT_MODEL_ID)
+                                .catch { e ->
+                                    if (retryCount < maxRetries - 1) {
+                                        errorMessage = "Retrying STT... (Attempt ${retryCount + 2}/$maxRetries)"
+                                    } else {
+                                        errorMessage = "STT download failed: ${e.message}"
+                                    }
+                                }
+                                .collect { progress ->
+                                    if (progress.progress >= sttDownloadProgress) {
+                                        sttDownloadProgress = progress.progress.coerceIn(0f, 1f)
+                                    }
+                                }
+                            
+                            if (sttDownloadProgress >= 0.99f) break
+                        } catch (e: Exception) {
+                            errorMessage = "STT error: ${e.message}"
                         }
-                        .collect { progress ->
-                            sttDownloadProgress = progress.progress
+                        
+                        retryCount++
+                        if (retryCount < maxRetries && sttDownloadProgress < 0.99f) {
+                            kotlinx.coroutines.delay(500)
                         }
+                    }
                     
                     isSTTDownloading = false
                 }
                 
-                // Load the model
                 isSTTLoading = true
                 RunAnywhere.loadSTTModel(STT_MODEL_ID)
                 isSTTLoaded = true

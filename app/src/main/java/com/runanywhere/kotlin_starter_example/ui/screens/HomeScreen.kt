@@ -23,6 +23,7 @@ import com.runanywhere.kotlin_starter_example.ui.theme.*
 
 @Composable
 fun HomeScreen(
+    onNavigateToAlgsoch: () -> Unit = {},
     onNavigateToChat: () -> Unit,
     onNavigateToSTT: () -> Unit,
     onNavigateToTTS: () -> Unit,
@@ -67,8 +68,18 @@ fun HomeScreen(
                 columns = GridCells.Fixed(2),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier.height(560.dp)
+                modifier = Modifier.height(700.dp)  // Increased height
             ) {
+                item {
+                    FeatureCard(
+                        title = "Algsoch",
+                        subtitle = "AI Study Companion",
+                        icon = Icons.Rounded.School,
+                        gradientColors = listOf(AccentBlue, Color(0xFF2563EB)),
+                        onClick = onNavigateToAlgsoch
+                    )
+                }
+                
                 item {
                     FeatureCard(
                         title = "Chat",

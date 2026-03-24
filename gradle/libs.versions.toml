@@ -13,11 +13,12 @@ lifecycleViewmodelCompose = "2.8.7"
 navigationCompose = "2.8.5"
 coroutines = "1.9.0"
 runanywhere = "0.20.6"
+richtext = "0.17.0"
+room = "2.6.1"
+coil = "2.6.0"
 
 [libraries]
-# RunAnywhere SDK (0.20.5 - VLM support, tool calling APIs, streaming fixes)
-# VLM: RunAnywhere.loadVLMModel(), processImageStream(), describeImage()
-# Tool Calling: RunAnywhereToolCalling.registerTool(), generateWithTools()
+# RunAnywhere SDK
 runanywhere-sdk = { group = "io.github.sanchitmonga22", name = "runanywhere-sdk-android", version.ref = "runanywhere" }
 runanywhere-llamacpp = { group = "io.github.sanchitmonga22", name = "runanywhere-llamacpp-android", version.ref = "runanywhere" }
 runanywhere-onnx = { group = "io.github.sanchitmonga22", name = "runanywhere-onnx-android", version.ref = "runanywhere" }
@@ -44,8 +45,20 @@ androidx-navigation-compose = { group = "androidx.navigation", name = "navigatio
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 
+# Coil
+coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
+
+# Markdown rendering
+richtext-commonmark = { group = "com.halilibo.compose-richtext", name = "richtext-commonmark", version.ref = "richtext" }
+richtext-ui-material3 = { group = "com.halilibo.compose-richtext", name = "richtext-ui-material3", version.ref = "richtext" }
+
+# Room Database
+room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
+room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
+room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
-
+ksp = { id = "com.google.devtools.ksp", version = "2.0.20-1.0.25" }

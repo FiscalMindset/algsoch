@@ -1,0 +1,910 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Algsoch - AI Study Companion</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="logo">
+                <h1>Algsoch</h1>
+                <p>Your AI Study Companion</p>
+            </div>
+            <ul class="nav-links">
+                <li><a href="#home">Home</a></li>
+                <li><a href="#features">Features</a></li>
+                <li><a href="#modes">Modes</a></li>
+                <li><a href="#download">Download</a></li>
+                <li><a href="#install">Installation</a></li>
+                <li><a href="#contact">Contact</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section id="home" class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h1>Learn Smarter with AI</h1>
+                <p>Algsoch is an advanced AI-powered study companion that adapts to your learning style. Get personalized help with 7 different learning modes.</p>
+                <div class="hero-buttons">
+                    <a href="#download" class="btn btn-primary">Download APK</a>
+                    <a href="#features" class="btn btn-secondary">Learn More</a>
+                </div>
+            </div>
+            <div class="hero-image">
+                <div class="phone-mockup">
+                    <div class="screen animated-screen">
+                        <!-- SCREEN 1: HOME/MODE SELECTION -->
+                        <div class="screen-content screen-1">
+                            <div style="background: linear-gradient(135deg, #0B0F14 0%, #1a1f2e 100%); flex: 1; display: flex; flex-direction: column; width: 100%; padding-top: 10px;">
+                                
+                                <!-- Header with Icon -->
+                                <div style="padding: 15px; text-align: center; position: relative;">
+                                    <div style="background: radial-gradient(circle at 50% 50%, rgba(59, 130, 246, 0.3) 0%, rgba(59, 130, 246, 0) 70%); position: absolute; top: -20px; left: -20px; width: 150px; height: 150px; border-radius: 50%; pointer-events: none;"></div>
+                                    <div style="background: #3B82F6; width: 44px; height: 44px; border-radius: 10px; margin: 0 auto 8px; display: flex; align-items: center; justify-content: center; font-size: 20px;">✨</div>
+                                    <h1 style="margin: 0; font-size: 20px; font-weight: 700; color: white;">Algsoch</h1>
+                                    <p style="margin: 4px 0 0 0; font-size: 10px; color: #3B82F6; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Advanced Learning AI</p>
+                                </div>
+
+                                <!-- Modes Section Label -->
+                                <div style="padding: 0 15px 10px; font-size: 10px; color: #94A3B8; text-transform: uppercase; font-weight: 600; letter-spacing: 1px;">📚 Modes</div>
+
+                                <!-- Smart Chat Featured Card -->
+                                <div style="margin: 0 10px 15px; padding: 15px; background: #1e293b; border: 2px solid #3B82F6; border-radius: 16px; border-left: 6px solid #3B82F6; height: 110px; display: flex; flex-direction: column; justify-content: space-between;">
+                                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                                        <div style="display: flex; gap: 8px; align-items: center;">
+                                            <span style="font-size: 18px;">💬</span>
+                                            <div>
+                                                <p style="margin: 0; font-weight: 600; font-size: 11px; color: white;">Smart Chat</p>
+                                                <p style="margin: 2px 0 0 0; font-size: 8px; color: #94A3B8;">Unified Experience</p>
+                                            </div>
+                                        </div>
+                                        <span style="font-size: 14px;">→</span>
+                                    </div>
+                                    <p style="margin: 0; font-size: 9px; color: #cbd5e1; line-height: 1.3;">Chat with AI, upload images, and solve problems in one place.</p>
+                                </div>
+
+                                <!-- Your Assistants Section -->
+                                <div style="padding: 0 15px 8px; display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: #94A3B8; font-weight: 600;">
+                                    <span style="text-transform: uppercase; letter-spacing: 0.5px;">🤖 Your Assistants</span>
+                                    <span style="font-size: 14px; cursor: pointer;">+</span>
+                                </div>
+
+                                <!-- Add Assistant Card -->
+                                <div style="margin: 0 10px; padding: 25px 15px; background: #1e293b; border: 2px dashed #334155; border-radius: 12px; text-align: center;">
+                                    <p style="margin: 0; font-size: 12px; color: #94A3B8; font-weight: 500;">+ Create custom AI assistant</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- SCREEN 2: MODEL DOWNLOAD -->
+                        <div class="screen-content screen-2">
+                            <div style="background: linear-gradient(135deg, #0B0F14 0%, #121821 100%); flex: 1; display: flex; flex-direction: column;">
+                                <!-- Header -->
+                                <div style="background: #0B0F14; padding: 15px; border-bottom: 1px solid #1e293b;">
+                                    <p style="margin: 0; font-weight: bold; font-size: 13px; color: white;">Smart Chat</p>
+                                    <p style="margin: 4px 0 0 0; font-size: 10px; color: #94A3B8;">Download & Load Model</p>
+                                </div>
+
+                                <!-- Model Info -->
+                                <div style="padding: 15px; border-bottom: 1px solid #1e293b;">
+                                    <p style="margin: 0 0 10px 0; font-size: 10px; color: #94A3B8; text-transform: uppercase; font-weight: 600;">📦 AI Model</p>
+                                    <div style="background: #1e293b; padding: 12px; border-radius: 8px; border-left: 3px solid #3B82F6;">
+                                        <p style="margin: 0 0 5px 0; font-weight: 600; font-size: 12px; color: white;">SmolLM2 360M</p>
+                                        <p style="margin: 0; font-size: 10px; color: #94A3B8;">Size: ~300MB | RAM: 1.5GB</p>
+                                    </div>
+                                </div>
+
+                                <!-- Download Progress -->
+                                <div style="padding: 15px; flex: 1; display: flex; flex-direction: column; justify-content: center;">
+                                    <p style="margin: 0 0 15px 0; font-size: 11px; color: #94A3B8; text-transform: uppercase; font-weight: 600;">⬇️ Download Status</p>
+                                    <div style="background: #1e293b; padding: 12px; border-radius: 8px; margin-bottom: 12px;">
+                                        <div style="display: flex; justify-content: space-between; margin-bottom: 8px; color: white;">
+                                            <span style="font-size: 10px;">Downloading...</span>
+                                            <span style="font-size: 10px; color: #3B82F6; font-weight: 600;">45%</span>
+                                        </div>
+                                        <div style="background: #0B0F14; height: 6px; border-radius: 3px; overflow: hidden;">
+                                            <div style="background: linear-gradient(90deg, #3B82F6 0%, #06B6D4 100%); height: 100%; width: 45%; border-radius: 3px;"></div>
+                                        </div>
+                                        <p style="margin: 8px 0 0 0; font-size: 9px; color: #94A3B8;">135 MB / 300 MB</p>
+                                    </div>
+
+                                    <!-- Load Button -->
+                                    <button style="width: 100%; background: #10b981; color: white; border: none; padding: 12px; border-radius: 8px; font-size: 11px; font-weight: 700; cursor: pointer; margin-top: 10px;">✓ Load Model</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- SCREEN 3: CHAT INTERFACE -->
+                        <div class="screen-content screen-3">
+                            <div style="background: linear-gradient(135deg, #0B0F14 0%, #121821 100%); flex: 1; display: flex; flex-direction: column; width: 100%;">
+                                
+                                <!-- Top App Bar -->
+                                <div style="background: #0B0F14; padding: 10px 12px; border-bottom: 1px solid #1e293b; display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                                    <div style="display: flex; align-items: center; gap: 8px; flex: 1;">
+                                        <span style="cursor: pointer; font-size: 16px;">←</span>
+                                        <div style="background: #3B82F6; width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px;">✨</div>
+                                        <div style="flex: 1;">
+                                            <p style="margin: 0; font-weight: bold; font-size: 11px; color: white;">Smart Chat</p>
+                                            <p style="margin: 2px 0 0 0; font-size: 8px; color: #3B82F6; font-weight: 600;">📝 Direct Mode</p>
+                                        </div>
+                                    </div>
+                                    <div style="display: flex; gap: 8px; font-size: 14px;">
+                                        <span style="cursor: pointer;">📊</span>
+                                        <span style="cursor: pointer;">💾</span>
+                                    </div>
+                                </div>
+
+                                <!-- Model Loader Widget -->
+                                <div style="margin: 12px; padding: 12px; background: #1e293b; border: 1px solid #334155; border-radius: 12px;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                        <div>
+                                            <p style="margin: 0; font-weight: 600; font-size: 10px; color: white;">SmolLM2 360M</p>
+                                            <p style="margin: 2px 0 0 0; font-size: 8px; color: #94A3B8;">Not loaded</p>
+                                        </div>
+                                        <button style="background: #10b981; color: white; border: none; padding: 6px 10px; border-radius: 6px; font-size: 8px; font-weight: 600; cursor: pointer;">Load</button>
+                                    </div>
+                                    <!-- Progress Bar -->
+                                    <div style="background: #0B0F14; height: 4px; border-radius: 2px; overflow: hidden; margin-bottom: 6px;">
+                                        <div style="background: linear-gradient(90deg, #3B82F6 0%, #06B6D4 100%); height: 100%; width: 45%;"></div>
+                                    </div>
+                                    <p style="margin: 0; font-size: 8px; color: #94A3B8;">Downloading... 135 MB / 300 MB</p>
+                                </div>
+
+                                <!-- Chat Messages Area -->
+                                <div style="flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px;">
+                                    <!-- User Message -->
+                                    <div style="display: flex; justify-content: flex-end;">
+                                        <div style="background: #3B82F6; padding: 10px 12px; border-radius: 12px; max-width: 75%; font-size: 9px; line-height: 1.4; color: white;">
+                                            What is photosynthesis?
+                                        </div>
+                                    </div>
+
+                                    <!-- AI Response -->
+                                    <div style="display: flex; justify-content: flex-start;">
+                                        <div style="background: #1e293b; padding: 10px 12px; border-radius: 4px 12px 12px 12px; max-width: 85%; font-size: 8px; line-height: 1.5; border-left: 3px solid #3B82F6; color: white;">
+                                            <div style="font-weight: 600; margin-bottom: 4px; color: #06B6D4;">Photosynthesis Process</div>
+                                            Photosynthesis converts light energy to chemical energy. Plants use water and CO₂ to produce glucose and oxygen in chloroplasts.
+                                            <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #334155; font-size: 7px; color: #94A3B8; display: flex; gap: 8px;">
+                                                <span>SmolLM2 360M</span>
+                                                <span>|</span>
+                                                <span>156 tokens</span>
+                                                <span>|</span>
+                                                <span>1.2s</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div style="display: flex; justify-content: flex-start; gap: 8px; margin-left: 12px;">
+                                        <span style="cursor: pointer; font-size: 12px;">👍</span>
+                                        <span style="cursor: pointer; font-size: 12px;">📋</span>
+                                    </div>
+                                </div>
+
+                                <!-- Input Bar Section -->
+                                <div style="background: #121821; padding: 10px; border-top: 1px solid #1e293b; display: flex; gap: 6px; align-items: flex-end;">
+                                    <!-- Mode Chip -->
+                                    <div style="background: rgba(59, 130, 246, 0.15); padding: 6px 10px; border-radius: 12px; font-size: 8px; color: #3B82F6; font-weight: 600; white-space: nowrap; cursor: pointer; flex-shrink: 0;">
+                                        🎚️ Mode
+                                    </div>
+                                    
+                                    <!-- Input Field -->
+                                    <input type="text" placeholder="Ask anything..." style="flex: 1; background: #0B0F14; border: 1px solid #334155; color: white; padding: 8px 10px; border-radius: 10px; font-size: 9px; outline: none;" />
+                                    
+                                    <!-- Action Buttons -->
+                                    <div style="display: flex; gap: 4px;">
+                                        <button style="background: #0B0F14; color: #94A3B8; border: 1px solid #334155; width: 32px; height: 32px; padding: 0; border-radius: 8px; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center;">📷</button>
+                                        <button style="background: #3B82F6; color: white; border: none; width: 32px; height: 32px; padding: 0; border-radius: 8px; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; font-weight: bold;">↑</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="features">
+        <div class="container">
+            <h2>Why Choose Algsoch?</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">🤖</div>
+                    <h3>AI-Powered Learning</h3>
+                    <p>Advanced SmolLM2-360M model provides intelligent, contextual responses to your questions.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🎯</div>
+                    <h3>7 Learning Modes</h3>
+                    <p>Choose how you learn - Direct, Answer, Explain, Notes, Direction, Creative, or Theory mode.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🔄</div>
+                    <h3>Conversation Memory</h3>
+                    <p>AI remembers your previous questions and builds on context for cohesive conversations.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📚</div>
+                    <h3>Study Notes</h3>
+                    <p>Generate beautiful, scannable study notes with key points and summaries automatically.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🖼️</div>
+                    <h3>Image Analysis</h3>
+                    <p>Upload images and ask questions about them - great for explaining diagrams and charts.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">💾</div>
+                    <h3>Chat History</h3>
+                    <p>Save and load your conversations - perfect for tracking your learning progress.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🌐</div>
+                    <h3>Multiple Languages</h3>
+                    <p>Learn in English, Hindi, or Hinglish - whatever works best for you.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">⚡</div>
+                    <h3>On-Device Processing</h3>
+                    <p>All processing happens locally on your device - no internet required, full privacy.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📊</div>
+                    <h3>Analytics</h3>
+                    <p>Track your learning stats - questions asked, topics covered, and time spent learning.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Modes Section -->
+    <section id="modes" class="modes">
+        <div class="container">
+            <h2>7 Powerful Learning Modes</h2>
+            <p class="section-subtitle">Each mode is optimized for different learning styles and situations</p>
+            
+            <div class="modes-container">
+                <!-- Direct Mode -->
+                <div class="mode-card">
+                    <div class="mode-header direct">
+                        <h3>Direct</h3>
+                        <span class="mode-badge">Conversational</span>
+                    </div>
+                    <div class="mode-content">
+                        <p class="mode-description">Pure conversation mode - just talk like you're texting a friend.</p>
+                        <div class="mode-details">
+                            <h4>Use When:</h4>
+                            <ul>
+                                <li>You want quick, casual answers</li>
+                                <li>You prefer natural conversation</li>
+                                <li>You need short 2-3 sentence responses</li>
+                            </ul>
+                            <h4>Example:</h4>
+                            <p><strong>You:</strong> What is Python?</p>
+                            <p><strong>AI:</strong> Python is a programming language that's great for beginners. It's used everywhere from web apps to AI, and it's way easier to learn than languages like C++.</p>
+                        </div>
+                        <div class="system-prompt">
+                            <h5>📋 System Prompt (Edit in PromptBuilder.kt):</h5>
+                            <pre>Pure conversation mode. Answer directly and naturally without any structure or guidance format.
+- Respond like a friend having a chat
+- Short, direct responses (2-3 sentences typically)
+- NO step-by-step or numbered points
+- NO problem-solving guidance
+- Just answer the question naturally</pre>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Answer Mode -->
+                <div class="mode-card">
+                    <div class="mode-header answer">
+                        <h3>Answer</h3>
+                        <span class="mode-badge">Direct Response</span>
+                    </div>
+                    <div class="mode-content">
+                        <p class="mode-description">Get direct, clear answers with quick explanations and examples.</p>
+                        <div class="mode-details">
+                            <h4>Use When:</h4>
+                            <ul>
+                                <li>You need a focused answer to a specific question</li>
+                                <li>You want 1-2 practical examples</li>
+                                <li>You need confidence-building explanations</li>
+                            </ul>
+                            <h4>Example:</h4>
+                            <p><strong>You:</strong> What is a variable?</p>
+                            <p><strong>AI:</strong> A variable is a named container that stores a value. Example: `name = "John"` stores text. Variables let you reuse values without typing them repeatedly.</p>
+                        </div>
+                        <div class="system-prompt">
+                            <h5>📋 System Prompt (Edit in PromptBuilder.kt):</h5>
+                            <pre>Give me a direct, clear answer to my question.
+- Start with the main answer first (1-2 sentences)
+- Explain why it's the answer
+- Give 1-2 practical examples
+- Keep paragraphs short and readable
+- Sound confident and knowledgeable</pre>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Explain Mode -->
+                <div class="mode-card">
+                    <div class="mode-header explain">
+                        <h3>Explain</h3>
+                        <span class="mode-badge">Step-by-Step</span>
+                    </div>
+                    <div class="mode-content">
+                        <p class="mode-description">Teacher-style breakdown with real examples and clear progression.</p>
+                        <div class="mode-details">
+                            <h4>Use When:</h4>
+                            <ul>
+                                <li>You need deep understanding</li>
+                                <li>You want step-by-step breakdowns</li>
+                                <li>You learn best from examples</li>
+                            </ul>
+                            <h4>Example:</h4>
+                            <p><strong>You:</strong> How does a loop work?</p>
+                            <p><strong>AI:</strong> Think of a loop like washing dishes - you repeat the same action multiple times. First you wet it, soap it, rinse it... then do the next dish. In code, loops repeat a block of code until a condition is met...</p>
+                        </div>
+                        <div class="system-prompt">
+                            <h5>📋 System Prompt (Edit in PromptBuilder.kt):</h5>
+                            <pre>Explain this like a good teacher breaking it down step by step.
+- Start with a simple way to think about it
+- Go through the main ideas one at a time
+- Use real examples to show what you mean
+- Keep sentences clear and not too long
+- Make it easy to follow</pre>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Notes Mode -->
+                <div class="mode-card">
+                    <div class="mode-header notes">
+                        <h3>Notes</h3>
+                        <span class="mode-badge">Scannable</span>
+                    </div>
+                    <div class="mode-content">
+                        <p class="mode-description">Study notes format - bullet points, key topics, perfect for review.</p>
+                        <div class="mode-details">
+                            <h4>Use When:</h4>
+                            <ul>
+                                <li>You're preparing for exams</li>
+                                <li>You need quick review material</li>
+                                <li>You like structured bullet points</li>
+                            </ul>
+                            <h4>Example Output:</h4>
+                            <p><strong>Photosynthesis</strong></p>
+                            <p>- Process where plants convert light into chemical energy<br>
+                            - Requires sunlight, water, and CO2<br>
+                            - Produces oxygen and glucose</p>
+                        </div>
+                        <div class="system-prompt">
+                            <h5>📋 System Prompt (Edit in PromptBuilder.kt):</h5>
+                            <pre>STUDY NOTES FORMAT - MANDATORY:
+OUTPUT BULLET POINTS ONLY. Use this exact format:
+
+Topic Name
+- Key point 1
+- Key point 2
+
+RULES FOR NOTES:
+- Start each line with a hyphen (-)
+- Keep each point SHORT (one line max)
+- Use 2-4 main topics
+- End with "Summary: [one sentence]"
+- DO NOT write paragraphs or flowing text
+- Structure like flashcard study notes</pre>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Direction Mode -->
+                <div class="mode-card">
+                    <div class="mode-header direction">
+                        <h3>Direction</h3>
+                        <span class="mode-badge">How-To</span>
+                    </div>
+                    <div class="mode-content">
+                        <p class="mode-description">Step-by-step problem-solving with tips and common mistakes.</p>
+                        <div class="mode-details">
+                            <h4>Use When:</h4>
+                            <ul>
+                                <li>You need to solve a problem</li>
+                                <li>You want to learn the process</li>
+                                <li>You need warnings about common mistakes</li>
+                            </ul>
+                            <h4>Example Output:</h4>
+                            <p><strong>Step 1:</strong> Identify what you know<br>
+                            <strong>Step 2:</strong> Write the formula<br>
+                            <strong>Tips:</strong> Check your units!<br>
+                            <strong>Common Mistakes:</strong> Forgetting to square the answer</p>
+                        </div>
+                        <div class="system-prompt">
+                            <h5>📋 System Prompt (Edit in PromptBuilder.kt):</h5>
+                            <pre>STEP-BY-STEP SOLUTION FORMAT - MANDATORY:
+OUTPUT NUMBERED STEPS ONLY. Use this exact format:
+
+Step 1: [First action]
+[Brief explanation]
+
+Step 2: [Second action]
+[Brief explanation]
+
+Tips:
+- Tip 1
+- Tip 2
+
+Common Mistakes:
+- Mistake 1
+- Mistake 2
+
+RULES FOR STEPS:
+- Start each step with "Step 1:", "Step 2:", etc.
+- Always include "Tips:" section
+- Always include "Common Mistakes:" section
+- Focus on HOW TO DO IT, not theory</pre>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Creative Mode -->
+                <div class="mode-card">
+                    <div class="mode-header creative">
+                        <h3>Creative</h3>
+                        <span class="mode-badge">Storytelling</span>
+                    </div>
+                    <div class="mode-content">
+                        <p class="mode-description">Memorable explanations with real-world connections and analogies.</p>
+                        <div class="mode-details">
+                            <h4>Use When:</h4>
+                            <ul>
+                                <li>You want to remember concepts forever</li>
+                                <li>You enjoy stories and analogies</li>
+                                <li>You learn through comparisons</li>
+                            </ul>
+                            <h4>Example:</h4>
+                            <p><strong>You:</strong> What is DNA?</p>
+                            <p><strong>AI:</strong> Imagine DNA as a cookbook for building your body. Each recipe (gene) tells your cells exactly what protein to make...</p>
+                        </div>
+                        <div class="system-prompt">
+                            <h5>📋 System Prompt (Edit in PromptBuilder.kt):</h5>
+                            <pre>Tell me the story or connection behind this. Make it memorable.
+- Start with "Imagine..." or "Think about..."
+- Use comparisons to things I know
+- Make it interesting to read
+- Show why this is useful in real life
+- End with why I should care</pre>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Theory Mode -->
+                <div class="mode-card">
+                    <div class="mode-header theory">
+                        <h3>Theory</h3>
+                        <span class="mode-badge">Deep Dive</span>
+                    </div>
+                    <div class="mode-content">
+                        <p class="mode-description">Complete theoretical foundation with history and connections.</p>
+                        <div class="mode-details">
+                            <h4>Use When:</h4>
+                            <ul>
+                                <li>You want complete understanding</li>
+                                <li>You need historical context</li>
+                                <li>You're writing research papers</li>
+                            </ul>
+                            <h4>Example:</h4>
+                            <p><strong>You:</strong> Explain evolution</p>
+                            <p><strong>AI:</strong> Evolution is the process by which organisms change over time. Darwin proposed this in 1859... The big picture is that organisms adapt to survive...</p>
+                        </div>
+                        <div class="system-prompt">
+                            <h5>📋 System Prompt (Edit in PromptBuilder.kt):</h5>
+                            <pre>Give me the deep, theoretical understanding.
+- Explain the big picture first
+- Go into the main ideas and concepts
+- Show how it connects to other things
+- Talk about the background and history
+- Be thorough and accurate</pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Technical Stack Section -->
+    <section class="tech-stack-section">
+        <div class="container">
+            <div class="section-header">
+                <h2>Built with Power</h2>
+                <p>Advanced technology optimized for speed and privacy</p>
+            </div>
+            
+            <div class="tech-grid">
+                <div class="tech-card">
+                    <div class="tech-icon">🧠</div>
+                    <h3>AI Intelligence</h3>
+                    <div class="tech-specs">
+                        <div class="spec-item">
+                            <span class="spec-label">Large Language Model</span>
+                            <span class="spec-value">SmolLM2-360M</span>
+                        </div>
+                        <div class="spec-divider"></div>
+                        <div class="spec-item">
+                            <span class="spec-label">Vision Model</span>
+                            <span class="spec-value">SmolVLM-256M</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tech-card">
+                    <div class="tech-icon">📱</div>
+                    <h3>Native Platform</h3>
+                    <div class="tech-specs">
+                        <div class="spec-item">
+                            <span class="spec-label">Framework</span>
+                            <span class="spec-value">Android/Kotlin</span>
+                        </div>
+                        <div class="spec-divider"></div>
+                        <div class="spec-item">
+                            <span class="spec-label">UI Library</span>
+                            <span class="spec-value">Jetpack Compose</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tech-card">
+                    <div class="tech-icon">💾</div>
+                    <h3>Data Management</h3>
+                    <div class="tech-specs">
+                        <div class="spec-item">
+                            <span class="spec-label">Storage Format</span>
+                            <span class="spec-value">Local JSON</span>
+                        </div>
+                        <div class="spec-divider"></div>
+                        <div class="spec-item">
+                            <span class="spec-label">Persistence</span>
+                            <span class="spec-value">Full Chat History</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tech-card">
+                    <div class="tech-icon">⚡</div>
+                    <h3>Performance</h3>
+                    <div class="tech-specs">
+                        <div class="spec-item">
+                            <span class="spec-label">Processing</span>
+                            <span class="spec-value">100% On-Device</span>
+                        </div>
+                        <div class="spec-divider"></div>
+                        <div class="spec-item">
+                            <span class="spec-label">Privacy Level</span>
+                            <span class="spec-value">Zero Cloud Access</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Download Hero Section -->
+    <section id="download" class="download-hero">
+        <div class="container">
+            <div class="download-content">
+                <div class="download-text">
+                    <h2>Start Learning Smarter Today</h2>
+                    <p>Download Algsoch and experience AI-powered learning that works completely offline. Get instant responses, full privacy, and zero data collection.</p>
+                    
+                    <div class="download-cta">
+                        <button class="btn-primary btn-lg">Download APK Now</button>
+                        <a href="https://github.com/algsoch" target="_blank" class="btn-secondary btn-lg">View GitHub</a>
+                    </div>
+                </div>
+
+                <div class="app-specs-card">
+                    <div class="spec-row">
+                        <span class="spec-icon">📦</span>
+                        <div>
+                            <p class="spec-title">Version</p>
+                            <p class="spec-data">1.0.0</p>
+                        </div>
+                    </div>
+                    <div class="spec-row">
+                        <span class="spec-icon">💾</span>
+                        <div>
+                            <p class="spec-title">Download Size</p>
+                            <p class="spec-data">~45 MB</p>
+                        </div>
+                    </div>
+                    <div class="spec-row">
+                        <span class="spec-icon">🔧</span>
+                        <div>
+                            <p class="spec-title">Requirements</p>
+                            <p class="spec-data">Android 10+</p>
+                        </div>
+                    </div>
+                    <div class="spec-row">
+                        <span class="spec-icon">✨</span>
+                        <div>
+                            <p class="spec-title">Features</p>
+                            <p class="spec-data">All 7 Modes</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Installation Steps - Visual Timeline -->
+    <section class="installation-section" id="install">
+        <div class="container">
+            <div class="section-header">
+                <h2>Simple Setup Process</h2>
+                <p>Get running in 5 easy steps</p>
+            </div>
+
+            <div class="installation-timeline">
+                <div class="timeline-item">
+                    <div class="timeline-marker">1</div>
+                    <div class="timeline-content">
+                        <h4>Download APK</h4>
+                        <p>Tap the download button and save the APK file to your device.</p>
+                        <div class="timeline-highlight">Direct download, no app store required</div>
+                    </div>
+                </div>
+
+                <div class="timeline-item">
+                    <div class="timeline-marker">2</div>
+                    <div class="timeline-content">
+                        <h4>Enable Unknown Sources</h4>
+                        <p>Navigate to Settings → Apps & Notifications → Advanced → Install unknown apps → Select your file manager and enable.</p>
+                        <div class="timeline-highlight">Security setting for non-Play Store apps</div>
+                    </div>
+                </div>
+
+                <div class="timeline-item">
+                    <div class="timeline-marker">3</div>
+                    <div class="timeline-content">
+                        <h4>Install the App</h4>
+                        <p>Open your Downloads folder, tap the APK file, and follow the installation prompts.</p>
+                        <div class="timeline-highlight">Installation takes less than 1 minute</div>
+                    </div>
+                </div>
+
+                <div class="timeline-item highlight-step">
+                    <div class="timeline-marker">⚠️</div>
+                    <div class="timeline-content">
+                        <h4>Load AI Models</h4>
+                        <p>On first launch, you'll see the model loader. Tap "Load" to download SmolLM2 (~250 MB). This is critical—it enables all offline features.</p>
+                        <div class="timeline-highlight">Takes 2-3 minutes. Requires 250 MB storage. Auto-retries if needed.</div>
+                    </div>
+                </div>
+
+                <div class="timeline-item">
+                    <div class="timeline-marker">5</div>
+                    <div class="timeline-content">
+                        <h4>Start Learning</h4>
+                        <p>Pick your learning mode and begin asking questions. Everything works completely offline.</p>
+                        <div class="timeline-highlight">All 7 modes ready to use</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Why Algsoch - Feature Cards -->
+    <section class="why-algsoch-section">
+        <div class="container">
+            <div class="section-header">
+                <h2>Why Choose Algsoch?</h2>
+                <p>Four powerful reasons that set it apart</p>
+            </div>
+
+            <div class="why-features-grid">
+                <div class="why-card">
+                    <div class="why-card-header">
+                        <div class="why-icon">🔓</div>
+                        <h3>Works Offline</h3>
+                    </div>
+                    <p>All AI runs directly on your device. No internet needed. No servers. No tracking.</p>
+                    <ul class="why-benefits">
+                        <li>Zero data uploads</li>
+                        <li>Works anywhere</li>
+                        <li>No connectivity issues</li>
+                    </ul>
+                </div>
+
+                <div class="why-card">
+                    <div class="why-card-header">
+                        <div class="why-icon">⚡</div>
+                        <h3>Lightning Fast</h3>
+                    </div>
+                    <p>Instant responses powered by optimized SmolLM2 model running on your hardware.</p>
+                    <ul class="why-benefits">
+                        <li>Sub-second latency</li>
+                        <li>No server delays</li>
+                        <li>Smooth experience</li>
+                    </ul>
+                </div>
+
+                <div class="why-card">
+                    <div class="why-card-header">
+                        <div class="why-icon">🔒</div>
+                        <h3>100% Private</h3>
+                    </div>
+                    <p>Your conversations never leave your device. Complete ownership of your data.</p>
+                    <ul class="why-benefits">
+                        <li>Zero tracking</li>
+                        <li>No analytics</li>
+                        <li>Full encryption</li>
+                    </ul>
+                </div>
+
+                <div class="why-card">
+                    <div class="why-card-header">
+                        <div class="why-icon">📦</div>
+                        <h3>Lightweight & Free</h3>
+                    </div>
+                    <p>Only 45 MB when installed. Open-source, completely free, no hidden costs.</p>
+                    <ul class="why-benefits">
+                        <li>Works on older phones</li>
+                        <li>No subscriptions</li>
+                        <li>No paywalls</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- FAQ - Modern Accordion -->
+    <section class="faq-section">
+        <div class="container">
+            <div class="section-header">
+                <h2>Frequently Asked Questions</h2>
+                <p>Everything you need to know about Algsoch</p>
+            </div>
+
+            <div class="faq-container">
+                <details class="faq-item">
+                    <summary>
+                        <span class="faq-question">Do I need an internet connection?</span>
+                        <span class="faq-toggle">+</span>
+                    </summary>
+                    <div class="faq-answer">
+                        <p>No! Algsoch runs completely offline. All AI processing happens directly on your device. You can use it anywhere without needing WiFi or mobile data.</p>
+                    </div>
+                </details>
+
+                <details class="faq-item">
+                    <summary>
+                        <span class="faq-question">Will my conversations be stored or tracked?</span>
+                        <span class="faq-toggle">+</span>
+                    </summary>
+                    <div class="faq-answer">
+                        <p>All conversations stay locally on your device only. We don't collect, store, or upload any data. You have 100% control over your learning history.</p>
+                    </div>
+                </details>
+
+                <details class="faq-item">
+                    <summary>
+                        <span class="faq-question">What subjects can I study?</span>
+                        <span class="faq-toggle">+</span>
+                    </summary>
+                    <div class="faq-answer">
+                        <p>Algsoch works with any subject: Math, Science, Languages, Programming, History, Economics, Philosophy, and more. The AI adapts to whatever you're learning.</p>
+                    </div>
+                </details>
+
+                <details class="faq-item">
+                    <summary>
+                        <span class="faq-question">Is Algsoch completely free?</span>
+                        <span class="faq-toggle">+</span>
+                    </summary>
+                    <div class="faq-answer">
+                        <p>Yes, 100% free. Algsoch is open-source with no subscriptions, no ads, and no hidden costs. We believe education should be accessible to everyone.</p>
+                    </div>
+                </details>
+
+                <details class="faq-item">
+                    <summary>
+                        <span class="faq-question">How do the 7 learning modes work?</span>
+                        <span class="faq-toggle">+</span>
+                    </summary>
+                    <div class="faq-answer">
+                        <p>Tap the Mode button in the chat interface to see all 7 learning styles: Direct Answer, Explain Concept, Study Notes, Step-by-Step Direction, Creative Exploration, Theory Deep-Dive, and Q&A Format. Each adapts the AI's response style.</p>
+                    </div>
+                </details>
+
+                <details class="faq-item">
+                    <summary>
+                        <span class="faq-question">Can I upload images?</span>
+                        <span class="faq-toggle">+</span>
+                    </summary>
+                    <div class="faq-answer">
+                        <p>Yes! Use the image button in the chat to upload photos of diagrams, equations, handwritten notes, charts, or any visual content. The AI will analyze and help explain what you've shared.</p>
+                    </div>
+                </details>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer Section -->
+    <section id="contact" class="contact-section">
+        <div class="container">
+            <h2>Get in Touch</h2>
+            <div class="contact-info">
+                <p>Have questions? Found a bug? Want to contribute?</p>
+                <div class="contact-buttons">
+                    <a href="https://github.com/algsoch/algsoch/issues" target="_blank" class="btn btn-secondary">GitHub Issues</a>
+                    <a href="https://github.com/algsoch" target="_blank" class="btn btn-secondary">Contact Creator</a>
+                    <a href="https://github.com/algsoch/algsoch" target="_blank" class="btn btn-secondary">View Source</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- About Me Section -->
+    <section class="about-me">
+        <div class="container">
+            <h2>Meet the Creator</h2>
+            <div class="about-content">
+                <div class="about-image">
+                    <img id="github-avatar" alt="Vicky Kumar" class="avatar">
+                </div>
+                <div class="about-text">
+                    <h3>Vicky Kumar</h3>
+                    <p class="about-subtitle">@algsoch</p>
+                    <p>Hi! I'm Vicky Kumar, the creator of Algsoch. I built this AI study companion to help students learn smarter, not harder. With 7 different learning modes and advanced AI, Algsoch adapts to your unique learning style.</p>
+                    <p>Algsoch is open-source and completely free because I believe education should be accessible to everyone.</p>
+                    <div class="about-links">
+                        <a href="https://github.com/algsoch" target="_blank" class="btn btn-secondary">GitHub Profile</a>
+                        <a href="https://github.com/algsoch/algsoch" target="_blank" class="btn btn-secondary">View Repository</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-box">
+                <div class="footer-item">
+                    <h4>Algsoch</h4>
+                    <p>AI Study Companion</p>
+                </div>
+                <div class="footer-divider"></div>
+                <div class="footer-item">
+                    <h4>Links</h4>
+                    <div class="footer-links-inline">
+                        <a href="https://github.com/algsoch" target="_blank">GitHub</a>
+                        <a href="#features">Features</a>
+                        <a href="#modes">Modes</a>
+                        <a href="#download">Download</a>
+                    </div>
+                </div>
+                <div class="footer-divider"></div>
+                <div class="footer-item">
+                    <h4>Info</h4>
+                    <div class="footer-badges">
+                        <span class="badge">Open Source</span>
+                        <span class="badge">Privacy First</span>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-bottom-simple">
+                <p>&copy; 2026 <strong>Algsoch</strong> | Powered by <a href="https://www.runanywhere.ai/" target="_blank">RunAnywhere SDK</a></p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>

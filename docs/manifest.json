@@ -1,0 +1,28 @@
+{
+    "name": "Algsoch - AI Study Companion",
+    "short_name": "Algsoch",
+    "description": "Advanced AI-powered study companion with 7 learning modes. Get personalized help in 3 languages with offline processing.",
+    "start_url": "/algsoch/",
+    "display": "standalone",
+    "background_color": "#ffffff",
+    "theme_color": "#4a90e2",
+    "orientation": "portrait-primary",
+    "scope": "/algsoch/",
+    "icons": [
+        {
+            "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%234a90e2' width='192' height='192'/><text x='96' y='130' font-size='140' font-weight='bold' fill='white' text-anchor='middle' font-family='Arial'>A</text></svg>",
+            "sizes": "192x192",
+            "type": "image/svg+xml",
+            "purpose": "any"
+        }
+    ],
+    "screenshots": [
+        {
+            "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 540 720'><rect fill='%23667eea' width='540' height='720'/><text x='270' y='360' font-size='80' fill='white' text-anchor='middle' font-family='Arial' font-weight='bold'>Algsoch</text><text x='270' y='420' font-size='40' fill='white' text-anchor='middle' font-family='Arial'>AI Study</text></svg>",
+            "sizes": "540x720",
+            "type": "image/svg+xml"
+        }
+    ],
+    "categories": ["education", "productivity"],
+    "screenshots_format": "image/svg+xml"
+}

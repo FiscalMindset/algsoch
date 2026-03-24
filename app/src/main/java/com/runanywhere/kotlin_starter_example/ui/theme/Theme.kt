@@ -6,7 +6,12 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-// Color palette matching Flutter app
+// Algsoch color palette
+val BackgroundDark = Color(0xFF0B0F14)  // Main background
+val SurfaceSecondary = Color(0xFF121821)  // Secondary surface
+val AccentBlue = Color(0xFF3B82F6)  // Primary accent
+
+// Legacy colors (keeping for existing screens)
 val PrimaryDark = Color(0xFF0A0E1A)
 val PrimaryMid = Color(0xFF1A1F35)
 val SurfaceCard = Color(0xFF1E2536)
@@ -17,6 +22,7 @@ val AccentGreen = Color(0xFF10B981)
 val AccentOrange = Color(0xFFF97316)
 val TextPrimary = Color(0xFFFFFFFF)
 val TextMuted = Color(0xFF94A3B8)
+val TextSecondary = Color(0xFFB0B8C1)
 
 private val DarkColorScheme = darkColorScheme(
     primary = AccentCyan,
