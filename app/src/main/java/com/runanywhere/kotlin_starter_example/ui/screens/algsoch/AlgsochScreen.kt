@@ -186,6 +186,7 @@ fun AlgsochScreen(
             onNewSession = { viewModel.startNewSession(); showHistory = false },
             onLoadSession = { viewModel.loadChatSession(it); showHistory = false },
             onDeleteSession = { viewModel.deleteChatSession(it) },
+            onDeleteAllSessions = { viewModel.deleteAllChatSessions() },
             onDismiss = { showHistory = false }
         )
     }
@@ -457,6 +458,7 @@ private fun MessageBubble(
     onSeeHow: () -> Unit
 ) {
     val isUser = message.isUser
+    val isMissingSavedReply = isMissingSavedReplyText(message.text)
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
@@ -515,16 +517,24 @@ private fun MessageBubble(
                                 append(response.deepExplanation)
                             }
                         }.trim().ifBlank {
-                            message.text.ifBlank { "This reply has no visible text available." }
+                            if (isMissingSavedReply) {
+                                "Older reply could not be restored from saved history."
+                            } else {
+                                message.text.ifBlank { "This reply has no visible text available." }
+                            }
                         }
                         SelectionContainer {
                             Text(
                                 text = fullContent,
-                                color = Color.White,
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontSize = 16.sp,
-                                    lineHeight = 24.sp
-                                ),
+                                color = if (isMissingSavedReply) TextMuted else Color.White,
+                                style = if (isMissingSavedReply) {
+                                    MaterialTheme.typography.bodySmall.copy(lineHeight = 20.sp)
+                                } else {
+                                    MaterialTheme.typography.bodyMedium.copy(
+                                        fontSize = 16.sp,
+                                        lineHeight = 24.sp
+                                    )
+                                },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 4.dp),
@@ -566,13 +576,17 @@ private fun MessageBubble(
                     } ?: run {
                         // For plain text responses
                         val plainText = message.text.ifBlank {
-                            "This saved reply has no visible text available."
+                            "Older reply could not be restored from saved history."
                         }
                         SelectionContainer {
                             Text(
-                                text = plainText,
-                                color = if (message.text.isBlank()) TextMuted else Color.White,
-                                style = MaterialTheme.typography.bodyMedium,
+                                text = if (isMissingSavedReply) {
+                                    "Older reply could not be restored from saved history."
+                                } else {
+                                    plainText
+                                },
+                                color = if (isMissingSavedReply || message.text.isBlank()) TextMuted else Color.White,
+                                style = if (isMissingSavedReply) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
                                 modifier = Modifier.fillMaxWidth(),
                                 lineHeight = 1.6.sp
                             )
@@ -582,19 +596,21 @@ private fun MessageBubble(
             }
 
             // Interaction row
-            Row(modifier = Modifier.padding(top = 8.dp, start = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                IconButton(onClick = { onFeedback(FeedbackType.LIKE) }, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Rounded.ThumbUp, null, tint = if (message.feedbackType == FeedbackType.LIKE) AccentGreen else TextMuted, modifier = Modifier.size(18.dp))
-                }
-                IconButton(
-                    onClick = {
-                        val textToCopy = message.structuredResponse?.toDisplayText() ?: message.text
-                        copyToClipboard(context, textToCopy)
-                    },
-                    modifier = Modifier.size(36.dp),
-                    enabled = message.structuredResponse != null || message.text.isNotBlank()
-                ) {
-                    Icon(Icons.Rounded.ContentCopy, null, tint = AccentBlue, modifier = Modifier.size(18.dp))
+            if (!isMissingSavedReply) {
+                Row(modifier = Modifier.padding(top = 8.dp, start = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    IconButton(onClick = { onFeedback(FeedbackType.LIKE) }, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Rounded.ThumbUp, null, tint = if (message.feedbackType == FeedbackType.LIKE) AccentGreen else TextMuted, modifier = Modifier.size(18.dp))
+                    }
+                    IconButton(
+                        onClick = {
+                            val textToCopy = message.structuredResponse?.toDisplayText() ?: message.text
+                            copyToClipboard(context, textToCopy)
+                        },
+                        modifier = Modifier.size(36.dp),
+                        enabled = message.structuredResponse != null || message.text.isNotBlank()
+                    ) {
+                        Icon(Icons.Rounded.ContentCopy, null, tint = AccentBlue, modifier = Modifier.size(18.dp))
+                    }
                 }
             }
         }
@@ -627,6 +643,10 @@ private fun formatResponseTime(ms: Long): String {
     }
 }
 
+private fun isMissingSavedReplyText(text: String): Boolean =
+    text.contains("[Older saved reply unavailable]", ignoreCase = true) ||
+        text.contains("saved reply has no visible text available", ignoreCase = true)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PremiumHistorySheet(
@@ -635,8 +655,11 @@ private fun PremiumHistorySheet(
     onNewSession: () -> Unit,
     onLoadSession: (String) -> Unit,
     onDeleteSession: (String) -> Unit,
+    onDeleteAllSessions: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    var showDeleteAllWarning by remember { mutableStateOf(false) }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = BackgroundDark,
@@ -664,15 +687,33 @@ private fun PremiumHistorySheet(
 
             Spacer(Modifier.height(20.dp))
 
-            Button(
-                onClick = onNewSession,
-                modifier = Modifier.fillMaxWidth().height(54.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = AccentBlue)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Icon(Icons.Rounded.Add, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Start New Session", fontWeight = FontWeight.Bold)
+                Button(
+                    onClick = onNewSession,
+                    modifier = Modifier.weight(1f).height(54.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentBlue)
+                ) {
+                    Icon(Icons.Rounded.Add, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Start New Session", fontWeight = FontWeight.Bold)
+                }
+
+                OutlinedButton(
+                    onClick = { showDeleteAllWarning = true },
+                    modifier = Modifier.height(54.dp),
+                    enabled = sessions.isNotEmpty(),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF8A80)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x33FF8A80))
+                ) {
+                    Icon(Icons.Rounded.DeleteSweep, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Delete All", fontWeight = FontWeight.Bold)
+                }
             }
 
             Spacer(Modifier.height(24.dp))
@@ -713,6 +754,37 @@ private fun PremiumHistorySheet(
                 }
             }
         }
+    }
+
+    if (showDeleteAllWarning) {
+        AlertDialog(
+            onDismissRequest = { showDeleteAllWarning = false },
+            containerColor = SurfaceSecondary,
+            title = {
+                Text("Delete all conversations?", color = Color.White, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text(
+                    "This will permanently remove every saved chat history item. This action cannot be undone.",
+                    color = TextMuted
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteAllWarning = false
+                        onDeleteAllSessions()
+                    }
+                ) {
+                    Text("Delete All", color = Color(0xFFFF8A80), fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteAllWarning = false }) {
+                    Text("Cancel", color = TextMuted)
+                }
+            }
+        )
     }
 }
 

@@ -53,7 +53,7 @@ class ChatHistoryManager(private val context: Context) {
                 lastModified = file.lastModified(),
                 messageCount = sessionMessages.size,
                 questionCount = sessionMessages.count { it.isUser },
-                title = deriveSessionTitle(sessionMessages, file.nameWithoutExtension),
+                title = deriveSessionTitle(sessionMessages, file.nameWithoutExtension, file.lastModified()),
                 preview = deriveSessionPreview(sessionMessages)
             )
         }.sortedByDescending { it.lastModified }
@@ -156,6 +156,13 @@ class ChatHistoryManager(private val context: Context) {
                 file.delete() && deletedAll
             }
         }
+
+    suspend fun deleteAllChatSessions(): Boolean =
+        withContext(Dispatchers.IO) {
+            listSessionFiles().fold(true) { deletedAll, file ->
+                file.delete() && deletedAll
+            }
+        }
     
     /**
      * Get chat export directory path for file access
@@ -231,7 +238,7 @@ class ChatHistoryManager(private val context: Context) {
                         val isUser = extractJsonValue(objStr, "isUser").toBoolean()
                         val text = extractJsonValue(objStr, "text")
                         val restoredText = text.ifBlank {
-                            if (isUser) "" else "This older saved reply has no visible text available."
+                            if (isUser) "" else "[Older saved reply unavailable]"
                         }
                         
                         messages.add(
@@ -252,14 +259,13 @@ class ChatHistoryManager(private val context: Context) {
     }
     
     private fun extractJsonValue(json: String, key: String): String {
-        // Find the key and get everything until the closing quote, handling escaped quotes
         val keyPattern = """"$key"\s*:\s*"""".toRegex()
         val keyMatch = keyPattern.find(json) ?: return ""
-        
+
         val startIndex = keyMatch.range.last + 1
-        val valueString = json.substring(startIndex)
-        
-        // Extract the complete quoted string, handling escaped characters
+        if (startIndex >= json.length) return ""
+
+        val valueString = json.substring(startIndex).trimStart()
         if (valueString.startsWith("\"")) {
             var endIndex = 1
             var isEscaped = false
@@ -283,7 +289,15 @@ class ChatHistoryManager(private val context: Context) {
                 endIndex++
             }
         }
-        return ""
+
+        return when {
+            valueString.startsWith("true") -> "true"
+            valueString.startsWith("false") -> "false"
+            valueString.startsWith("null") -> "null"
+            else -> valueString
+                .takeWhile { it != ',' && it != '\n' && it != '\r' && it != '}' }
+                .trim()
+        }
     }
 
     private fun messageTextForStorage(message: ChatMessage): String =
@@ -297,7 +311,11 @@ class ChatHistoryManager(private val context: Context) {
             .replace("\r", "\\r")
             .replace("\t", "\\t")
 
-    private fun deriveSessionTitle(messages: List<ChatMessage>, fallbackName: String): String {
+    private fun deriveSessionTitle(
+        messages: List<ChatMessage>,
+        fallbackName: String,
+        lastModified: Long
+    ): String {
         val firstPrompt = messages
             .firstOrNull { it.isUser && it.text.isNotBlank() }
             ?.text
@@ -306,14 +324,14 @@ class ChatHistoryManager(private val context: Context) {
         return if (!firstPrompt.isNullOrBlank()) {
             firstPrompt.take(52)
         } else {
-            humanizeFallbackName(fallbackName)
+            humanizeFallbackName(fallbackName, lastModified)
         }
     }
 
     private fun deriveSessionPreview(messages: List<ChatMessage>): String {
         val lastAssistantMessage = messages
             .asReversed()
-            .firstOrNull { !it.isUser && it.text.isNotBlank() }
+            .firstOrNull { !it.isUser && isUsefulSessionText(it.text) }
             ?.text
             ?.singleLine()
 
@@ -321,26 +339,36 @@ class ChatHistoryManager(private val context: Context) {
             return lastAssistantMessage.take(96)
         }
 
-        val lastMessage = messages
+        val lastUserMessage = messages
             .asReversed()
-            .firstOrNull { it.text.isNotBlank() }
+            .firstOrNull { it.isUser && isUsefulSessionText(it.text) }
             ?.text
             ?.singleLine()
 
-        return lastMessage?.take(96) ?: "Resume this conversation."
+        return lastUserMessage?.take(96) ?: "Open this chat to continue learning."
     }
 
-    private fun humanizeFallbackName(rawName: String): String {
+    private fun humanizeFallbackName(rawName: String, lastModified: Long): String {
         val cleaned = canonicalSessionName(rawName).replace('_', ' ').trim()
         return if (cleaned.matches(Regex("chat\\s*\\d+"))) {
-            "Untitled Chat"
+            "Saved chat · ${formatSessionDate(lastModified)}"
         } else {
             cleaned.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
         }
     }
 
+    private fun isUsefulSessionText(text: String): Boolean =
+        text.isNotBlank() && !isMissingSavedReplyMarker(text)
+
+    private fun isMissingSavedReplyMarker(text: String): Boolean =
+        text.contains("[Older saved reply unavailable]", ignoreCase = true) ||
+            text.contains("saved reply has no visible text available", ignoreCase = true)
+
     private fun String.singleLine(): String =
         replace(Regex("\\s+"), " ").trim()
+
+    private fun formatSessionDate(timestamp: Long): String =
+        SimpleDateFormat("d MMM, h:mm a", Locale.getDefault()).format(Date(timestamp))
 }
 
 data class ChatSession(

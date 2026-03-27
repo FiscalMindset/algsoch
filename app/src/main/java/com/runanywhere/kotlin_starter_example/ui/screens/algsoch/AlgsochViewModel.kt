@@ -364,6 +364,18 @@ class AlgsochViewModel : ViewModel() {
             } catch (_: Exception) {}
         }
     }
+
+    fun deleteAllChatSessions() {
+        viewModelScope.launch {
+            try {
+                chatHistoryManager?.deleteAllChatSessions()
+                messages = emptyList()
+                currentSessionPath = null
+                loadChatSessionsListOnly()
+                updateUserStats()
+            } catch (_: Exception) {}
+        }
+    }
     
     private fun updateUserStats() {
         val userMessages = messages.filter { it.isUser }
