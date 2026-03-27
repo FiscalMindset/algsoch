@@ -46,11 +46,15 @@ class ChatHistoryManager(private val context: Context) {
      */
     suspend fun loadAllChatSessions(): List<ChatSession> = withContext(Dispatchers.IO) {
         listCanonicalSessionFiles().map { file ->
+            val sessionMessages = jsonToMessages(file.readText())
             ChatSession(
                 name = canonicalSessionName(file.nameWithoutExtension),
                 path = file.absolutePath,
                 lastModified = file.lastModified(),
-                messageCount = jsonToMessages(file.readText()).size
+                messageCount = sessionMessages.size,
+                questionCount = sessionMessages.count { it.isUser },
+                title = deriveSessionTitle(sessionMessages, file.nameWithoutExtension),
+                preview = deriveSessionPreview(sessionMessages)
             )
         }.sortedByDescending { it.lastModified }
     }
@@ -197,10 +201,11 @@ class ChatHistoryManager(private val context: Context) {
         return buildString {
             append("[\n")
             messages.forEachIndexed { index, msg ->
+                val storedText = messageTextForStorage(msg)
                 append("  {\n")
                 append("    \"timestamp\": ${msg.timestamp},\n")
                 append("    \"isUser\": ${msg.isUser},\n")
-                append("    \"text\": \"${msg.text.replace("\"", "\\\"")}\",\n")
+                append("    \"text\": \"${escapeJsonString(storedText)}\",\n")
                 append("    \"feedbackType\": ${msg.feedbackType?.name?.let { "\"$it\"" } ?: "null"}\n")
                 append("  }")
                 if (index < messages.size - 1) append(",")
@@ -225,11 +230,14 @@ class ChatHistoryManager(private val context: Context) {
                         val timestamp = extractJsonValue(objStr, "timestamp").toLongOrNull() ?: System.currentTimeMillis()
                         val isUser = extractJsonValue(objStr, "isUser").toBoolean()
                         val text = extractJsonValue(objStr, "text")
+                        val restoredText = text.ifBlank {
+                            if (isUser) "" else "This older saved reply has no visible text available."
+                        }
                         
                         messages.add(
                             ChatMessage(
                                 id = timestamp,
-                                text = text,
+                                text = restoredText,
                                 isUser = isUser,
                                 timestamp = timestamp
                             )
@@ -270,19 +278,79 @@ class ChatHistoryManager(private val context: Context) {
                         .replace("\\\\", "\\")
                         .replace("\\n", "\n")
                         .replace("\\r", "\r")
+                        .replace("\\t", "\t")
                 }
                 endIndex++
             }
         }
         return ""
     }
+
+    private fun messageTextForStorage(message: ChatMessage): String =
+        message.text.ifBlank { message.structuredResponse?.toDisplayText().orEmpty() }
+
+    private fun escapeJsonString(text: String): String =
+        text
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t")
+
+    private fun deriveSessionTitle(messages: List<ChatMessage>, fallbackName: String): String {
+        val firstPrompt = messages
+            .firstOrNull { it.isUser && it.text.isNotBlank() }
+            ?.text
+            ?.singleLine()
+
+        return if (!firstPrompt.isNullOrBlank()) {
+            firstPrompt.take(52)
+        } else {
+            humanizeFallbackName(fallbackName)
+        }
+    }
+
+    private fun deriveSessionPreview(messages: List<ChatMessage>): String {
+        val lastAssistantMessage = messages
+            .asReversed()
+            .firstOrNull { !it.isUser && it.text.isNotBlank() }
+            ?.text
+            ?.singleLine()
+
+        if (!lastAssistantMessage.isNullOrBlank()) {
+            return lastAssistantMessage.take(96)
+        }
+
+        val lastMessage = messages
+            .asReversed()
+            .firstOrNull { it.text.isNotBlank() }
+            ?.text
+            ?.singleLine()
+
+        return lastMessage?.take(96) ?: "Resume this conversation."
+    }
+
+    private fun humanizeFallbackName(rawName: String): String {
+        val cleaned = canonicalSessionName(rawName).replace('_', ' ').trim()
+        return if (cleaned.matches(Regex("chat\\s*\\d+"))) {
+            "Untitled Chat"
+        } else {
+            cleaned.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+        }
+    }
+
+    private fun String.singleLine(): String =
+        replace(Regex("\\s+"), " ").trim()
 }
 
 data class ChatSession(
     val name: String,
     val path: String,
     val lastModified: Long,
-    val messageCount: Int
+    val messageCount: Int,
+    val questionCount: Int = 0,
+    val title: String = name,
+    val preview: String = ""
 )
 
 data class GlobalChatStats(

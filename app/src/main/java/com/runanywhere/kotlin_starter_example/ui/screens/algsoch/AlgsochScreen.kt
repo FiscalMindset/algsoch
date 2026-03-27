@@ -53,6 +53,9 @@ import com.runanywhere.kotlin_starter_example.services.ToolRegistry
 import com.runanywhere.kotlin_starter_example.ui.components.ModelLoaderWidget
 import com.runanywhere.kotlin_starter_example.ui.theme.*
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -511,6 +514,8 @@ private fun MessageBubble(
                                 append("\n\n")
                                 append(response.deepExplanation)
                             }
+                        }.trim().ifBlank {
+                            message.text.ifBlank { "This reply has no visible text available." }
                         }
                         SelectionContainer {
                             Text(
@@ -560,10 +565,13 @@ private fun MessageBubble(
                         }
                     } ?: run {
                         // For plain text responses
+                        val plainText = message.text.ifBlank {
+                            "This saved reply has no visible text available."
+                        }
                         SelectionContainer {
                             Text(
-                                text = message.text,
-                                color = Color.White,
+                                text = plainText,
+                                color = if (message.text.isBlank()) TextMuted else Color.White,
                                 style = MaterialTheme.typography.bodyMedium,
                                 modifier = Modifier.fillMaxWidth(),
                                 lineHeight = 1.6.sp
@@ -636,7 +644,25 @@ private fun PremiumHistorySheet(
     ) {
         Column(modifier = Modifier.padding(24.dp).fillMaxHeight(0.8f)) {
             Text("Chat History", style = MaterialTheme.typography.headlineSmall, color = Color.White, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Resume a real conversation, not just a file name.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextMuted
+            )
+
+            Spacer(Modifier.height(20.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                HistoryOverviewChip("Sessions", sessions.size.toString(), Modifier.weight(1f))
+                HistoryOverviewChip("Questions", sessions.sumOf { it.questionCount }.toString(), Modifier.weight(1f))
+                HistoryOverviewChip("Messages", sessions.sumOf { it.messageCount }.toString(), Modifier.weight(1f))
+            }
+
+            Spacer(Modifier.height(20.dp))
 
             Button(
                 onClick = onNewSession,
@@ -651,9 +677,39 @@ private fun PremiumHistorySheet(
 
             Spacer(Modifier.height(24.dp))
 
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(sessions) { session ->
-                    HistoryItem(session, session.path == currentSessionPath, { onLoadSession(session.path) }, { onDeleteSession(session.path) })
+            if (sessions.isEmpty()) {
+                Surface(
+                    color = SurfaceSecondary,
+                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(Icons.Rounded.History, null, tint = AccentBlue, modifier = Modifier.size(30.dp))
+                        Text("No saved chats yet", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(
+                            "Once you study here, this tab will show question titles, previews, and progress for each session.",
+                            color = TextMuted,
+                            textAlign = TextAlign.Center,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(sessions) { session ->
+                        HistoryItem(
+                            session = session,
+                            isActive = session.path == currentSessionPath,
+                            onClick = { onLoadSession(session.path) },
+                            onDelete = { onDeleteSession(session.path) }
+                        )
+                    }
                 }
             }
         }
@@ -668,19 +724,117 @@ private fun HistoryItem(session: ChatSession, isActive: Boolean, onClick: () -> 
         shape = RoundedCornerShape(14.dp),
         border = if (isActive) androidx.compose.foundation.BorderStroke(1.dp, AccentBlue) else null
     ) {
-        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Rounded.ChatBubbleOutline, null, tint = if (isActive) AccentBlue else TextMuted)
-            Spacer(Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(session.name, color = Color.White, fontWeight = FontWeight.Bold)
-                Text("${session.messageCount} messages", color = TextMuted, style = MaterialTheme.typography.labelSmall)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.Top) {
+                Surface(
+                    color = if (isActive) AccentBlue.copy(alpha = 0.16f) else BackgroundDark,
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Icon(
+                        Icons.Rounded.ChatBubbleOutline,
+                        null,
+                        tint = if (isActive) AccentBlue else TextMuted,
+                        modifier = Modifier.padding(10.dp)
+                    )
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (isActive) {
+                            Surface(
+                                color = AccentBlue.copy(alpha = 0.16f),
+                                shape = RoundedCornerShape(999.dp)
+                            ) {
+                                Text(
+                                    "Active",
+                                    color = AccentBlue,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            formatHistoryTimestamp(session.lastModified),
+                            color = TextMuted,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                    Text(
+                        session.title,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        session.preview,
+                        color = TextMuted,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Rounded.DeleteOutline, null, tint = Color.Red.copy(alpha = 0.6f))
+                }
             }
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Rounded.DeleteOutline, null, tint = Color.Red.copy(alpha = 0.6f))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                HistoryMetaChip("${session.questionCount} questions")
+                HistoryMetaChip("${session.messageCount} messages")
             }
         }
     }
 }
+
+@Composable
+private fun HistoryOverviewChip(label: String, value: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        color = SurfaceSecondary,
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(value, color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+            Text(label, color = TextMuted, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+@Composable
+private fun HistoryMetaChip(label: String) {
+    Surface(
+        color = BackgroundDark,
+        shape = RoundedCornerShape(999.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+    ) {
+        Text(
+            text = label,
+            color = TextMuted,
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+        )
+    }
+}
+
+private fun formatHistoryTimestamp(timestamp: Long): String =
+    SimpleDateFormat("d MMM, h:mm a", Locale.getDefault()).format(Date(timestamp))
 
 @Composable
 private fun ModernCustomModeDialog(
