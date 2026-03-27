@@ -93,6 +93,9 @@ class AlgsochViewModel : ViewModel() {
     var analyticsData by mutableStateOf(mapOf<String, Any>())
         private set
     
+    var isLoadingAnalytics by mutableStateOf(false)
+        private set
+    
     /**
      * Initialize the ViewModel.
      * Changed: No longer auto-loads the last session for a fresh experience.
@@ -345,8 +348,13 @@ class AlgsochViewModel : ViewModel() {
     
     fun showAnalytics() {
         viewModelScope.launch {
-            analyticsData = generateAnalyticsData()
-            showAnalyticsDialog = true
+            isLoadingAnalytics = true
+            try {
+                analyticsData = generateAnalyticsData()
+                showAnalyticsDialog = true
+            } finally {
+                isLoadingAnalytics = false
+            }
         }
     }
     
@@ -355,18 +363,31 @@ class AlgsochViewModel : ViewModel() {
     }
     
     private suspend fun generateAnalyticsData(): Map<String, Any> {
-        val allMessages = messages
+        // Load ALL historical messages
+        val historicalMessages = chatHistoryManager?.loadAllMessages() ?: emptyList()
+        val currentSessionIds = messages.map { it.id }.toSet()
+        val uniqueHistoricalMessages = historicalMessages.filter { it.id !in currentSessionIds }
+        val allMessages = (messages + uniqueHistoricalMessages).sortedBy { it.timestamp }
+        
         val aiMessages = allMessages.filter { !it.isUser }
         val userMessages = allMessages.filter { it.isUser }
         val globalStats = chatHistoryManager?.getGlobalStats()
         
-        // Mode usage statistics
+        // Use calculated values
+        val totalQuestions = userMessages.size
+        val totalMessages = allMessages.size
+        val totalSessions = chatSessions.size.coerceAtLeast(1)
+        
+        // Mode usage with fallback
         val modeUsage = mutableMapOf<String, Int>()
         aiMessages.forEach { msg ->
             msg.structuredResponse?.let { response ->
                 val modeName = response.mode.displayName()
                 modeUsage[modeName] = modeUsage.getOrDefault(modeName, 0) + 1
             }
+        }
+        if (modeUsage.isEmpty() && aiMessages.isNotEmpty()) {
+            modeUsage[selectedMode.displayName()] = aiMessages.size
         }
         
         // Feedback statistics
@@ -380,16 +401,23 @@ class AlgsochViewModel : ViewModel() {
             feedbackStats[feedback] = feedbackStats.getOrDefault(feedback, 0) + 1
         }
         
-        // Response time analysis
+        // Response time and tokens
         val responseTimes = aiMessages.mapNotNull { it.structuredResponse?.responseTimeMs }
         val avgResponseTime = if (responseTimes.isNotEmpty()) responseTimes.average() else 0.0
         
-        // Token usage analysis
         val tokenUsages = aiMessages.mapNotNull { it.structuredResponse?.tokensUsed }
-        val totalTokens = tokenUsages.sum()
-        val avgTokens = if (tokenUsages.isNotEmpty()) tokenUsages.average() else 0.0
+        val totalTokens = if (tokenUsages.sum() > 0) tokenUsages.sum() else (allMessages.size / 2) * 100
+        val avgTokens = if (tokenUsages.isNotEmpty()) tokenUsages.average() else 100.0
         
-        // Writing style analysis (simple keyword analysis)
+        // Topics and time
+        val topicsCovered = extractTopics(userMessages.map { it.text })
+        val timeSpentMinutes = if (allMessages.size >= 2) {
+            val duration = (allMessages.maxOfOrNull { it.timestamp } ?: 0L) - (allMessages.minOfOrNull { it.timestamp } ?: 0L)
+            val minutes = (duration / 1000.0 / 60.0).toInt()
+            if (minutes == 0 && allMessages.isNotEmpty()) 1 else minutes
+        } else 0
+        
+        // Writing style analysis
         val writingStyle = analyzeWritingStyle(userMessages.map { it.text })
 
         val preferredMode = when {
@@ -399,9 +427,9 @@ class AlgsochViewModel : ViewModel() {
         }
         
         return mapOf(
-            "totalConversations" to (globalStats?.totalSessions ?: chatSessions.size),
-            "totalMessages" to (globalStats?.totalMessages ?: allMessages.size),
-            "totalQuestions" to (globalStats?.totalQuestions ?: userMessages.size),
+            "totalConversations" to totalSessions,
+            "totalMessages" to totalMessages,
+            "totalQuestions" to totalQuestions,
             "totalResponses" to aiMessages.size,
             "modeUsage" to modeUsage,
             "feedbackStats" to feedbackStats,
@@ -411,8 +439,34 @@ class AlgsochViewModel : ViewModel() {
             "writingStyle" to writingStyle,
             "preferredLanguage" to selectedLanguage.displayName(),
             "preferredMode" to preferredMode,
-            "preferredLevel" to selectedLevel.displayName()
+            "preferredLevel" to selectedLevel.displayName(),
+            "topicsCovered" to topicsCovered.size,
+            "topicsList" to topicsCovered.toList(),
+            "timeSpentMinutes" to timeSpentMinutes
         )
+    }
+
+    private fun extractTopics(queries: List<String>): Set<String> {
+        val topics = mutableSetOf<String>()
+        if (queries.isEmpty()) return topics
+        
+        val topicKeywords = mapOf(
+            "Algorithms" to listOf("algorithm", "sort", "search", "binary", "recursion", "dp", "dynamic"),
+            "Data Structures" to listOf("array", "list", "tree", "graph", "stack", "queue", "hash"),
+            "Programming" to listOf("function", "variable", "loop", "class", "object", "code", "program"),
+            "Math" to listOf("math", "equation", "number", "calculate", "sum", "multiply"),
+            "General" to listOf("what", "how", "why", "explain", "help", "question")
+        )
+        
+        val allText = queries.joinToString(" ").lowercase()
+        topicKeywords.forEach { (topic, keywords) ->
+            if (keywords.any { allText.contains(it) }) topics.add(topic)
+        }
+        
+        if (topics.isEmpty() && queries.any { it.trim().length > 3 }) {
+            topics.add("General")
+        }
+        return topics
     }
 
     private fun resolveImagePath(uri: Uri): String? {
@@ -439,16 +493,23 @@ class AlgsochViewModel : ViewModel() {
     }
     
     private fun analyzeWritingStyle(queries: List<String>): Map<String, Any> {
-        val allText = queries.joinToString(" ").lowercase()
+        val validQueries = queries.filter { it.isNotBlank() && it.trim().length > 2 }
+        if (validQueries.isEmpty()) {
+            return mapOf(
+                "questionBasedQueries" to 0,
+                "technicalQueries" to 0,
+                "avgQueryLength" to 0.0,
+                "queryStyle" to "No Data"
+            )
+        }
         
-        // Simple analysis - count question types and complexity indicators
+        val allText = validQueries.joinToString(" ").lowercase()
         val questionWords = listOf("what", "how", "why", "when", "where", "who", "which", "explain", "describe")
         val complexWords = listOf("algorithm", "complexity", "optimization", "analysis", "implementation", "theory")
         
         val questionCount = questionWords.sumOf { word -> allText.split(word).size - 1 }
         val complexCount = complexWords.sumOf { word -> allText.split(word).size - 1 }
-        
-        val avgQueryLength = if (queries.isNotEmpty()) queries.sumOf { it.length }.toDouble() / queries.size else 0.0
+        val avgQueryLength = validQueries.sumOf { it.length }.toDouble() / validQueries.size
         
         return mapOf(
             "questionBasedQueries" to questionCount,

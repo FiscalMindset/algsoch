@@ -1,6 +1,7 @@
 package com.runanywhere.kotlin_starter_example.ui.screens
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioFormat
@@ -84,6 +85,7 @@ private class AudioCaptureService {
         const val CHUNK_SIZE_MS = 100 // Emit chunks every 100ms
     }
     
+    @SuppressLint("MissingPermission")
     fun startCapture(): Flow<ByteArray> = callbackFlow {
         val bufferSize = AudioRecord.getMinBufferSize(
             SAMPLE_RATE,
@@ -229,6 +231,11 @@ fun VoicePipelineScreen(
      * - Continuous conversation mode
      */
     fun startSession() {
+        if (!hasPermission) {
+            errorMessage = "Microphone permission is required"
+            return
+        }
+
         sessionState = VoiceSessionState.LISTENING
         errorMessage = null
         messages = messages + VoiceMessage("Listening... speak and pause to send", "status")

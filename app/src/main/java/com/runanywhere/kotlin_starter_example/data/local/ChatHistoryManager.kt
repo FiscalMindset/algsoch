@@ -70,6 +70,25 @@ class ChatHistoryManager(private val context: Context) {
     }
     
     /**
+     * Load ALL messages from ALL chat sessions for comprehensive analytics
+     */
+    suspend fun loadAllMessages(): List<ChatMessage> = withContext(Dispatchers.IO) {
+        val allMessages = mutableListOf<ChatMessage>()
+        val files = chatDir.listFiles()?.filter { it.isFile && it.extension == "json" } ?: emptyList()
+        
+        files.forEach { file ->
+            try {
+                val messages = jsonToMessages(file.readText())
+                allMessages.addAll(messages)
+            } catch (e: Exception) {
+                // Skip corrupted files
+            }
+        }
+        
+        allMessages.sortedBy { it.timestamp }
+    }
+    
+    /**
      * Load specific chat session
      */
     suspend fun loadChatSession(sessionPath: String): List<ChatMessage> = 

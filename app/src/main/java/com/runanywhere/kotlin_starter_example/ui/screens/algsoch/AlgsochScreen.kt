@@ -10,6 +10,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -195,6 +197,7 @@ fun AlgsochScreen(
     if (viewModel.showAnalyticsDialog) {
         PremiumAnalyticsDialog(
             data = viewModel.analyticsData,
+            isLoading = viewModel.isLoadingAnalytics,
             onDismiss = { viewModel.dismissAnalyticsDialog() }
         )
     }
@@ -375,7 +378,7 @@ private fun UnifiedInputBar(
 
             // Send / Cancel Button
             FloatingActionButton(
-                onClick = { 
+                onClick = {
                     if (isGenerating) {
                         onCancel()
                     } else if ((value.isNotBlank() || selectedImageUri != null) && !isGenerating) {
@@ -498,7 +501,7 @@ private fun MessageBubble(
                                 softWrap = true
                             )
                         }
-                        
+
                         // Metadata display below response
                         if (response.tokensUsed > 0 || response.responseTimeMs > 0) {
                             Spacer(Modifier.height(16.dp))
@@ -547,7 +550,7 @@ private fun MessageBubble(
                     }
                 }
             }
-            
+
             // Interaction row
             Row(modifier = Modifier.padding(top = 8.dp, start = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 IconButton(onClick = { onFeedback(FeedbackType.LIKE) }, modifier = Modifier.size(36.dp)) {
@@ -612,7 +615,7 @@ private fun PremiumHistorySheet(
         Column(modifier = Modifier.padding(24.dp).fillMaxHeight(0.8f)) {
             Text("Chat History", style = MaterialTheme.typography.headlineSmall, color = Color.White, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(24.dp))
-            
+
             Button(
                 onClick = onNewSession,
                 modifier = Modifier.fillMaxWidth().height(54.dp),
@@ -623,9 +626,9 @@ private fun PremiumHistorySheet(
                 Spacer(Modifier.width(8.dp))
                 Text("Start New Session", fontWeight = FontWeight.Bold)
             }
-            
+
             Spacer(Modifier.height(24.dp))
-            
+
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(sessions) { session ->
                     HistoryItem(session, session.path == currentSessionPath, { onLoadSession(session.path) }, { onDeleteSession(session.path) })
@@ -665,7 +668,7 @@ private fun ModernCustomModeDialog(
     var name by remember { mutableStateOf("") }
     var desc by remember { mutableStateOf("") }
     var selectedTools by remember { mutableStateOf(setOf<String>()) }
-    
+
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = SurfaceSecondary,
@@ -686,9 +689,9 @@ private fun ModernCustomModeDialog(
                     shape = RoundedCornerShape(12.dp),
                     colors = TextFieldDefaults.colors(focusedContainerColor = BackgroundDark, unfocusedContainerColor = BackgroundDark)
                 )
-                
+
                 Text("Select Capabilities", style = MaterialTheme.typography.labelLarge, color = AccentBlue, modifier = Modifier.padding(top = 8.dp))
-                
+
                 ToolRegistry.getAvailableTools().forEach { tool ->
                     val isSelected = selectedTools.contains(tool.id)
                     Surface(
@@ -732,7 +735,7 @@ private fun PremiumModeSelectorSheet(
         Column(modifier = Modifier.padding(24.dp).navigationBarsPadding()) {
             Text("Switch Mode", style = MaterialTheme.typography.headlineSmall, color = Color.White, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(20.dp))
-            
+
             // First row of modes
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(ResponseMode.DIRECT, ResponseMode.ANSWER, ResponseMode.EXPLAIN).forEach { mode ->
@@ -747,9 +750,9 @@ private fun PremiumModeSelectorSheet(
                     }
                 }
             }
-            
+
             Spacer(Modifier.height(12.dp))
-            
+
             // Second row of modes
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(ResponseMode.NOTES, ResponseMode.DIRECTION, ResponseMode.CREATIVE, ResponseMode.THEORY).forEach { mode ->
@@ -764,16 +767,16 @@ private fun PremiumModeSelectorSheet(
                     }
                 }
             }
-            
+
             Spacer(Modifier.height(24.dp))
             Text("Your AI Assistants", style = MaterialTheme.typography.labelLarge, color = AccentViolet)
             Spacer(Modifier.height(12.dp))
-            
+
             CustomModeStore.getModes().forEach { mode ->
                 AssistantItemInSheet(mode) { viewModel.changeCustomMode(mode); onDismiss() }
                 Spacer(Modifier.height(8.dp))
             }
-            
+
             Spacer(Modifier.height(12.dp))
             OutlinedButton(
                 onClick = onCreateCustomMode,
@@ -804,49 +807,452 @@ private fun AssistantItemInSheet(mode: CustomMode, onClick: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PremiumAnalyticsDialog(
     data: Map<String, Any>,
+    isLoading: Boolean,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
+    val totalQuestions = (data["totalQuestions"] as? Number)?.toInt() ?: 0
+    val totalSessions = ((data["totalSessions"] ?: data["totalConversations"]) as? Number)?.toInt() ?: 0
+    val totalMessages = (data["totalMessages"] as? Number)?.toInt() ?: 0
+    val totalTokens = (data["totalTokens"] as? Number)?.toInt() ?: 0
+    val topicsCovered = (data["topicsCovered"] as? Number)?.toInt() ?: 0
+    val timeSpentMinutes = (data["timeSpentMinutes"] as? Number)?.toInt() ?: 0
+    val avgResponseTimeMs = (data["avgResponseTime"] as? Number)?.toLong() ?: 0L
+    val preferredMode = data["preferredMode"]?.toString()?.takeUnless { it.isBlank() || it == "null" } ?: "Answer"
+    val preferredLanguage = data["preferredLanguage"]?.toString()?.takeUnless { it.isBlank() || it == "null" } ?: "English"
+    val preferredLevel = data["preferredLevel"]?.toString()?.takeUnless { it.isBlank() || it == "null" } ?: "Smart"
+    val topicsList = (data["topicsList"] as? List<*>)?.mapNotNull { it?.toString()?.takeIf(String::isNotBlank) }.orEmpty()
+    val writingStyle = data["writingStyle"] as? Map<*, *>
+    val queryStyle = writingStyle?.get("queryStyle")?.toString()?.takeUnless { it.isBlank() || it == "null" } ?: "Balanced"
+    val avgQueryLength = (writingStyle?.get("avgQueryLength") as? Number)?.toDouble() ?: 0.0
+    val questionsPerSession = if (totalSessions > 0) totalQuestions.toDouble() / totalSessions else 0.0
+
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = SurfaceSecondary,
-        title = { Text("Learning Insights", fontWeight = FontWeight.Bold, color = Color.White) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    StatBox("Questions", data["totalQuestions"].toString(), AccentBlue, Modifier.weight(1f))
-                    StatBox("Tokens", data["totalTokens"].toString(), AccentGreen, Modifier.weight(1f))
+        containerColor = BackgroundDark,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = TextMuted) }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.92f)
+                .padding(horizontal = 20.dp)
+                .navigationBarsPadding()
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top
+            ) {
+                Surface(
+                    modifier = Modifier.size(42.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    color = AccentBlue.copy(alpha = 0.16f)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.Analytics, null, tint = AccentBlue, modifier = Modifier.size(22.dp))
+                    }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    StatBox("Sessions", data["totalConversations"].toString(), AccentViolet, Modifier.weight(1f))
-                    StatBox("Messages", data["totalMessages"].toString(), AccentCyan, Modifier.weight(1f))
+                Spacer(Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Learning Analytics",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Track your learning stats - questions asked, topics covered, and time spent learning.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary,
+                        lineHeight = 20.sp
+                    )
                 }
-                Surface(color = BackgroundDark, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text("Top Learning Mode", style = MaterialTheme.typography.labelSmall, color = TextMuted)
-                        Text(
-                            data["preferredMode"]?.toString().takeUnless { it.isNullOrBlank() || it == "null" } ?: "Answer",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Rounded.Close, null, tint = TextMuted)
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            if (isLoading) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = AccentBlue)
+                        Spacer(Modifier.height(16.dp))
+                        Text("Building your learning dashboard...", color = TextSecondary)
+                    }
+                }
+            } else {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(
+                                brush = Brush.linearGradient(
+                                    colors = listOf(
+                                        AccentBlue.copy(alpha = 0.24f),
+                                        AccentCyan.copy(alpha = 0.18f),
+                                        SurfaceSecondary
+                                    )
+                                )
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = Color.White.copy(alpha = 0.08f),
+                                shape = RoundedCornerShape(24.dp)
+                            )
+                            .padding(20.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Text(
+                                "Your study pulse",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = AccentCyan,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                "A clearer view of how much you have been learning and where your effort is going.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color.White,
+                                lineHeight = 20.sp
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                AnalyticsHighlightCard(
+                                    label = "Questions Asked",
+                                    value = totalQuestions.toString(),
+                                    supportingText = if (totalQuestions == 1) "1 prompt across your chats" else "$totalQuestions prompts across your chats",
+                                    icon = Icons.Rounded.Forum,
+                                    color = AccentBlue,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                AnalyticsHighlightCard(
+                                    label = "Topics Covered",
+                                    value = topicsCovered.toString(),
+                                    supportingText = if (topicsCovered == 1) "1 learning cluster found" else "$topicsCovered learning clusters found",
+                                    icon = Icons.Rounded.Psychology,
+                                    color = AccentGreen,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            AnalyticsHighlightCard(
+                                label = "Time Spent Learning",
+                                value = formatStudyTime(timeSpentMinutes),
+                                supportingText = if (timeSpentMinutes > 0) "Spread across $totalSessions sessions" else "Start chatting to build your timeline",
+                                icon = Icons.Rounded.Schedule,
+                                color = AccentOrange,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+
+                    AnalyticsSectionHeader(
+                        title = "Overview",
+                        subtitle = "The quick numbers behind your learning activity"
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        StatBox(
+                            label = "Sessions",
+                            value = totalSessions.toString(),
+                            color = AccentCyan,
+                            icon = Icons.Rounded.History,
+                            modifier = Modifier.weight(1f)
                         )
+                        StatBox(
+                            label = "Messages",
+                            value = totalMessages.toString(),
+                            color = AccentBlue,
+                            icon = Icons.Rounded.ChatBubbleOutline,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        StatBox(
+                            label = "Tokens Used",
+                            value = totalTokens.toString(),
+                            color = AccentViolet,
+                            icon = Icons.Rounded.Bolt,
+                            modifier = Modifier.weight(1f)
+                        )
+                        StatBox(
+                            label = "Avg. Reply",
+                            value = formatResponseTime(avgResponseTimeMs),
+                            color = AccentGreen,
+                            icon = Icons.Rounded.Speed,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    AnalyticsSectionHeader(
+                        title = "Study Profile",
+                        subtitle = "Patterns the app can infer from your questions"
+                    )
+                    Surface(
+                        color = SurfaceSecondary,
+                        shape = RoundedCornerShape(20.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.06f))
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(18.dp),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                StatBox(
+                                    label = "Learning Style",
+                                    value = queryStyle,
+                                    color = AccentOrange,
+                                    icon = Icons.Rounded.AutoAwesome,
+                                    modifier = Modifier.weight(1f),
+                                    supportingText = "${avgQueryLength.toInt()} avg chars / question"
+                                )
+                                StatBox(
+                                    label = "Questions / Session",
+                                    value = String.format("%.1f", questionsPerSession),
+                                    color = AccentPink,
+                                    icon = Icons.Rounded.Analytics,
+                                    modifier = Modifier.weight(1f),
+                                    supportingText = "Average pace"
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                AnalyticsTag(
+                                    label = "Mode: $preferredMode",
+                                    color = AccentBlue,
+                                    icon = Icons.Rounded.Tune,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                AnalyticsTag(
+                                    label = "Language: $preferredLanguage",
+                                    color = AccentGreen,
+                                    icon = Icons.Rounded.Language,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                AnalyticsTag(
+                                    label = "Level: $preferredLevel",
+                                    color = AccentViolet,
+                                    icon = Icons.Rounded.School,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                AnalyticsTag(
+                                    label = if (topicsCovered > 0) "Topic map ready" else "Topic map growing",
+                                    color = AccentOrange,
+                                    icon = Icons.Rounded.Analytics,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
+
+                    AnalyticsSectionHeader(
+                        title = "Topics Covered",
+                        subtitle = "Subjects detected from the kinds of questions you ask"
+                    )
+                    if (topicsList.isEmpty()) {
+                        Surface(
+                            color = SurfaceSecondary,
+                            shape = RoundedCornerShape(18.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.06f))
+                        ) {
+                            Text(
+                                "Ask a few more study questions and your topic map will start appearing here.",
+                                modifier = Modifier.padding(18.dp),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextSecondary,
+                                lineHeight = 20.sp
+                            )
+                        }
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            topicsList.chunked(2).forEach { topicRow ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    topicRow.forEach { topic ->
+                                        AnalyticsTag(
+                                            label = topic,
+                                            color = AccentCyan,
+                                            icon = Icons.Rounded.LocalOffer,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                    if (topicRow.size == 1) {
+                                        Spacer(Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close", color = AccentBlue) } }
-    )
+
+            Spacer(Modifier.height(16.dp))
+
+            Button(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = AccentBlue)
+            ) {
+                Text("Close Dashboard", fontWeight = FontWeight.Bold)
+            }
+
+            Spacer(Modifier.height(12.dp))
+        }
+    }
 }
 
 @Composable
-private fun StatBox(label: String, value: String, color: Color, modifier: Modifier) {
-    Surface(color = color.copy(alpha = 0.1f), shape = RoundedCornerShape(12.dp), modifier = modifier, border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.2f))) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(label, style = MaterialTheme.typography.labelSmall, color = color)
-            Text(value, style = MaterialTheme.typography.titleLarge, color = Color.White, fontWeight = FontWeight.Bold)
+private fun AnalyticsHighlightCard(
+    label: String,
+    value: String,
+    supportingText: String,
+    icon: ImageVector,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = Color.Black.copy(alpha = 0.16f),
+        shape = RoundedCornerShape(18.dp),
+        modifier = modifier,
+        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.22f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(icon, null, tint = color, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(label, style = MaterialTheme.typography.labelMedium, color = color, fontWeight = FontWeight.Bold)
+            }
+            Text(
+                value,
+                style = MaterialTheme.typography.headlineSmall,
+                color = Color.White,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                supportingText,
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary,
+                lineHeight = 18.sp
+            )
         }
+    }
+}
+
+@Composable
+private fun AnalyticsSectionHeader(
+    title: String,
+    subtitle: String
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            title,
+            style = MaterialTheme.typography.titleMedium,
+            color = Color.White,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = TextSecondary,
+            lineHeight = 18.sp
+        )
+    }
+}
+
+@Composable
+private fun StatBox(
+    label: String,
+    value: String,
+    color: Color,
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+    supportingText: String? = null
+) {
+    Surface(
+        color = color.copy(alpha = 0.1f),
+        shape = RoundedCornerShape(18.dp),
+        modifier = modifier,
+        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.18f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(icon, null, tint = color, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(label, style = MaterialTheme.typography.labelMedium, color = color, fontWeight = FontWeight.Bold)
+            }
+            Text(value, style = MaterialTheme.typography.titleLarge, color = Color.White, fontWeight = FontWeight.Bold)
+            supportingText?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = TextMuted, lineHeight = 18.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun AnalyticsTag(
+    label: String,
+    color: Color,
+    icon: ImageVector,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = color.copy(alpha = 0.12f),
+        shape = RoundedCornerShape(14.dp),
+        modifier = modifier,
+        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.22f))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(icon, null, tint = color, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                label,
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.White,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+private fun formatStudyTime(minutes: Int): String {
+    if (minutes <= 0) return "0 min"
+    if (minutes < 60) return "$minutes min"
+
+    val hours = minutes / 60
+    val remainingMinutes = minutes % 60
+    return if (remainingMinutes == 0) {
+        "$hours h"
+    } else {
+        "$hours h $remainingMinutes min"
     }
 }
 
