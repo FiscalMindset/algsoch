@@ -120,6 +120,7 @@ fun VisionScreen(
                         isDownloading = modelService.isVLMDownloading,
                         isLoading = modelService.isVLMLoading,
                         isLoaded = modelService.isVLMLoaded,
+                        isDownloaded = modelService.isVLMDownloaded,
                         downloadProgress = modelService.vlmDownloadProgress,
                         onLoadClick = { modelService.downloadAndLoadVLM() }
                     )

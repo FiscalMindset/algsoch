@@ -172,6 +172,7 @@ fun SpeechToTextScreen(
                     isDownloading = modelService.isSTTDownloading,
                     isLoading = modelService.isSTTLoading,
                     isLoaded = modelService.isSTTLoaded,
+                    isDownloaded = modelService.isSTTDownloaded,
                     downloadProgress = modelService.sttDownloadProgress,
                     onLoadClick = { modelService.downloadAndLoadSTT() }
                 )

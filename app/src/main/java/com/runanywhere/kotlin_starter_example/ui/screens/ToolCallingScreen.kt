@@ -195,6 +195,7 @@ fun ToolCallingScreen(
                         isDownloading = modelService.isLLMDownloading,
                         isLoading = modelService.isLLMLoading,
                         isLoaded = modelService.isLLMLoaded,
+                        isDownloaded = modelService.isLLMDownloaded,
                         downloadProgress = modelService.llmDownloadProgress,
                         onLoadClick = { modelService.downloadAndLoadLLM() }
                     )

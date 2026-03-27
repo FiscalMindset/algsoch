@@ -50,7 +50,6 @@ import com.runanywhere.kotlin_starter_example.data.store.CustomModeStore
 import com.runanywhere.kotlin_starter_example.domain.models.ReasoningStep
 import com.runanywhere.kotlin_starter_example.services.ModelService
 import com.runanywhere.kotlin_starter_example.services.ToolRegistry
-import com.runanywhere.kotlin_starter_example.ui.components.ModelLoaderWidget
 import com.runanywhere.kotlin_starter_example.ui.theme.*
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -105,18 +104,11 @@ fun AlgsochScreen(
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             Column(Modifier.fillMaxSize()) {
-                
-                // Model loader
-                if (!modelService.isLLMLoaded) {
-                    ModelLoaderWidget(
-                        modelName = "SmolLM2 360M",
-                        isDownloading = modelService.isLLMDownloading,
-                        isLoading = modelService.isLLMLoading,
-                        isLoaded = modelService.isLLMLoaded,
-                        downloadProgress = modelService.llmDownloadProgress,
-                        onLoadClick = { modelService.downloadAndLoadLLM() }
-                    )
-                }
+                PrimaryModelStatusPanel(
+                    modelService = modelService,
+                    onLoadChatModel = { modelService.downloadAndLoadLLM() },
+                    onLoadVisionModel = { modelService.downloadAndLoadVLM() }
+                )
                 
                 // Messages
                 LazyColumn(
@@ -170,6 +162,7 @@ fun AlgsochScreen(
                         selectedImageUri = selectedImageUri,
                         onClearImage = { selectedImageUri = null },
                         isVisionReady = modelService.isVLMLoaded,
+                        isVisionDownloaded = modelService.isVLMDownloaded,
                         isVisionLoading = modelService.isVLMLoading || modelService.isVLMDownloading,
                         onLoadVisionModel = { modelService.downloadAndLoadVLM() }
                     )
@@ -239,6 +232,227 @@ fun AlgsochScreen(
     }
 }
 
+@Composable
+private fun PrimaryModelStatusPanel(
+    modelService: ModelService,
+    onLoadChatModel: () -> Unit,
+    onLoadVisionModel: () -> Unit
+) {
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        val stacked = maxWidth < 560.dp
+
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                "Model Status",
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleSmall
+            )
+
+            if (stacked) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    CompactModelStatusCard(
+                        title = "Chat Model",
+                        subtitle = "Text conversations and answers",
+                        isLoaded = modelService.isLLMLoaded,
+                        isLoading = modelService.isLLMLoading,
+                        isDownloading = modelService.isLLMDownloading,
+                        isDownloaded = modelService.isLLMDownloaded,
+                        downloadProgress = modelService.llmDownloadProgress,
+                        accent = AccentBlue,
+                        onAction = onLoadChatModel
+                    )
+                    CompactModelStatusCard(
+                        title = "Vision Model",
+                        subtitle = "Image understanding and screenshots",
+                        isLoaded = modelService.isVLMLoaded,
+                        isLoading = modelService.isVLMLoading,
+                        isDownloading = modelService.isVLMDownloading,
+                        isDownloaded = modelService.isVLMDownloaded,
+                        downloadProgress = modelService.vlmDownloadProgress,
+                        accent = AccentGreen,
+                        onAction = onLoadVisionModel
+                    )
+                }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    CompactModelStatusCard(
+                        title = "Chat Model",
+                        subtitle = "Text conversations and answers",
+                        isLoaded = modelService.isLLMLoaded,
+                        isLoading = modelService.isLLMLoading,
+                        isDownloading = modelService.isLLMDownloading,
+                        isDownloaded = modelService.isLLMDownloaded,
+                        downloadProgress = modelService.llmDownloadProgress,
+                        accent = AccentBlue,
+                        onAction = onLoadChatModel,
+                        modifier = Modifier.weight(1f)
+                    )
+                    CompactModelStatusCard(
+                        title = "Vision Model",
+                        subtitle = "Image understanding and screenshots",
+                        isLoaded = modelService.isVLMLoaded,
+                        isLoading = modelService.isVLMLoading,
+                        isDownloading = modelService.isVLMDownloading,
+                        isDownloaded = modelService.isVLMDownloaded,
+                        downloadProgress = modelService.vlmDownloadProgress,
+                        accent = AccentGreen,
+                        onAction = onLoadVisionModel,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
+            modelService.errorMessage?.let { error ->
+                Surface(
+                    color = Color(0x33FF6B6B),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Rounded.ErrorOutline, null, tint = Color(0xFFFFA8A8), modifier = Modifier.size(18.dp))
+                        Text(
+                            text = error,
+                            color = Color(0xFFFFD6D6),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompactModelStatusCard(
+    title: String,
+    subtitle: String,
+    isLoaded: Boolean,
+    isLoading: Boolean,
+    isDownloading: Boolean,
+    isDownloaded: Boolean,
+    downloadProgress: Float,
+    accent: Color,
+    onAction: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = SurfaceSecondary,
+        shape = RoundedCornerShape(18.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.16f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(title, color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                    Text(subtitle, color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                }
+                Surface(
+                    color = accent.copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(999.dp)
+                ) {
+                    Text(
+                        text = modelStatusLabel(isLoaded, isLoading, isDownloading, isDownloaded),
+                        color = accent,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
+                }
+            }
+
+            if (isDownloading) {
+                LinearProgressIndicator(
+                    progress = { downloadProgress.coerceIn(0f, 1f) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(5.dp),
+                    color = accent,
+                    trackColor = BackgroundDark
+                )
+            } else if (isLoading) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(5.dp),
+                    color = accent,
+                    trackColor = BackgroundDark
+                )
+            }
+
+            Text(
+                text = modelStatusDescription(isLoaded, isLoading, isDownloading, isDownloaded, downloadProgress),
+                color = TextMuted,
+                style = MaterialTheme.typography.bodySmall
+            )
+
+            if (!isLoaded) {
+                OutlinedButton(
+                    onClick = onAction,
+                    enabled = !isLoading && !isDownloading,
+                    shape = RoundedCornerShape(12.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.25f))
+                ) {
+                    Text(
+                        when {
+                            isLoading || isDownloading -> "Working..."
+                            isDownloaded -> "Load"
+                            else -> "Download & Load"
+                        },
+                        color = accent,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun modelStatusLabel(
+    isLoaded: Boolean,
+    isLoading: Boolean,
+    isDownloading: Boolean,
+    isDownloaded: Boolean
+): String = when {
+    isLoaded -> "Ready"
+    isLoading -> "Loading"
+    isDownloading -> "Downloading"
+    isDownloaded -> "Downloaded"
+    else -> "Missing"
+}
+
+private fun modelStatusDescription(
+    isLoaded: Boolean,
+    isLoading: Boolean,
+    isDownloading: Boolean,
+    isDownloaded: Boolean,
+    downloadProgress: Float
+): String = when {
+    isLoaded -> "Already loaded in this session and ready to use."
+    isLoading -> "Preparing the model now. You should not need to tap again."
+    isDownloading -> "Downloading ${(downloadProgress * 100).toInt()}% and it will auto-load when finished."
+    isDownloaded -> "Already downloaded on this device. Tap load if it did not auto-restore."
+    else -> "Not on this device yet. Download once and future visits will auto-load it."
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AlgsochTopBar(
@@ -296,6 +510,7 @@ private fun UnifiedInputBar(
     selectedImageUri: Uri?,
     onClearImage: () -> Unit,
     isVisionReady: Boolean,
+    isVisionDownloaded: Boolean,
     isVisionLoading: Boolean,
     onLoadVisionModel: () -> Unit
 ) {
@@ -321,14 +536,25 @@ private fun UnifiedInputBar(
                     Icon(Icons.Rounded.WarningAmber, null, tint = AccentBlue, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        "Vision model not loaded.",
+                        when {
+                            isVisionLoading -> "Vision model is getting ready."
+                            isVisionDownloaded -> "Vision model is downloaded but not loaded."
+                            else -> "Vision model is not downloaded yet."
+                        },
                         color = Color.White,
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(Modifier.weight(1f))
                     TextButton(onClick = onLoadVisionModel, enabled = !isVisionLoading) {
-                        Text(if (isVisionLoading) "Loading..." else "Load Vision Model", color = AccentBlue)
+                        Text(
+                            when {
+                                isVisionLoading -> "Loading..."
+                                isVisionDownloaded -> "Load Vision"
+                                else -> "Download & Load"
+                            },
+                            color = AccentBlue
+                        )
                     }
                 }
             }

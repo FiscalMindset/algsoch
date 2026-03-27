@@ -437,6 +437,7 @@ private fun ModelLoaderSection(modelService: ModelService) {
             isDownloading = modelService.isLLMDownloading,
             isLoading = modelService.isLLMLoading,
             isLoaded = modelService.isLLMLoaded,
+            isDownloaded = modelService.isLLMDownloaded,
             downloadProgress = modelService.llmDownloadProgress,
             onLoadClick = { modelService.downloadAndLoadLLM() }
         )
@@ -446,6 +447,7 @@ private fun ModelLoaderSection(modelService: ModelService) {
             isDownloading = modelService.isSTTDownloading,
             isLoading = modelService.isSTTLoading,
             isLoaded = modelService.isSTTLoaded,
+            isDownloaded = modelService.isSTTDownloaded,
             downloadProgress = modelService.sttDownloadProgress,
             onLoadClick = { modelService.downloadAndLoadSTT() }
         )
@@ -455,6 +457,7 @@ private fun ModelLoaderSection(modelService: ModelService) {
             isDownloading = modelService.isTTSDownloading,
             isLoading = modelService.isTTSLoading,
             isLoaded = modelService.isTTSLoaded,
+            isDownloaded = modelService.isTTSDownloaded,
             downloadProgress = modelService.ttsDownloadProgress,
             onLoadClick = { modelService.downloadAndLoadTTS() }
         )

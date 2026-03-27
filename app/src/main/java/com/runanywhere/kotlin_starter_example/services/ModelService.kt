@@ -44,6 +44,8 @@ class ModelService : ViewModel() {
         private set
     var isLLMLoaded by mutableStateOf(false)
         private set
+    var isLLMDownloaded by mutableStateOf(false)
+        private set
     
     // STT state
     var isSTTDownloading by mutableStateOf(false)
@@ -53,6 +55,8 @@ class ModelService : ViewModel() {
     var isSTTLoading by mutableStateOf(false)
         private set
     var isSTTLoaded by mutableStateOf(false)
+        private set
+    var isSTTDownloaded by mutableStateOf(false)
         private set
     
     // TTS state
@@ -64,6 +68,8 @@ class ModelService : ViewModel() {
         private set
     var isTTSLoaded by mutableStateOf(false)
         private set
+    var isTTSDownloaded by mutableStateOf(false)
+        private set
     
     // VLM state
     var isVLMDownloading by mutableStateOf(false)
@@ -73,6 +79,8 @@ class ModelService : ViewModel() {
     var isVLMLoading by mutableStateOf(false)
         private set
     var isVLMLoaded by mutableStateOf(false)
+        private set
+    var isVLMDownloaded by mutableStateOf(false)
         private set
     
     var isVoiceAgentReady by mutableStateOf(false)
@@ -146,6 +154,7 @@ class ModelService : ViewModel() {
     init {
         viewModelScope.launch {
             refreshModelState()
+            autoLoadDownloadedPrimaryModels()
         }
     }
     
@@ -157,7 +166,23 @@ class ModelService : ViewModel() {
         isSTTLoaded = RunAnywhere.isSTTModelLoaded()
         isTTSLoaded = RunAnywhere.isTTSVoiceLoaded()
         isVLMLoaded = RunAnywhere.isVLMModelLoaded
+        isLLMDownloaded = isModelDownloaded(LLM_MODEL_ID)
+        isSTTDownloaded = isModelDownloaded(STT_MODEL_ID)
+        isTTSDownloaded = isModelDownloaded(TTS_MODEL_ID)
+        isVLMDownloaded = isModelDownloaded(VLM_MODEL_ID)
         isVoiceAgentReady = RunAnywhere.isVoiceAgentReady()
+    }
+
+    private suspend fun autoLoadDownloadedPrimaryModels() {
+        if (isLLMDownloaded && !isLLMLoaded && !isLLMLoading) {
+            loadLLMInternal(allowDownload = false, clearErrors = false)
+        }
+
+        if (isVLMDownloaded && !isVLMLoaded && !isVLMLoading) {
+            loadVLMInternal(allowDownload = false, clearErrors = false)
+        }
+
+        refreshModelState()
     }
     
     /**
@@ -173,60 +198,8 @@ class ModelService : ViewModel() {
      * Download and load LLM model
      */
     fun downloadAndLoadLLM() {
-        if (isLLMDownloading || isLLMLoading) return
-        
         viewModelScope.launch {
-            try {
-                errorMessage = null
-                
-                if (!isModelDownloaded(LLM_MODEL_ID)) {
-                    isLLMDownloading = true
-                    llmDownloadProgress = 0f
-                    
-                    var retryCount = 0
-                    val maxRetries = 3
-                    
-                    while (retryCount < maxRetries && llmDownloadProgress < 0.99f) {
-                        try {
-                            RunAnywhere.downloadModel(LLM_MODEL_ID)
-                                .catch { e ->
-                                    if (retryCount < maxRetries - 1) {
-                                        errorMessage = "Retrying download... (Attempt ${retryCount + 2}/$maxRetries)"
-                                    } else {
-                                        errorMessage = "Download failed: ${e.message}"
-                                    }
-                                }
-                                .collect { progress ->
-                                    if (progress.progress >= llmDownloadProgress) {
-                                        llmDownloadProgress = progress.progress.coerceIn(0f, 1f)
-                                    }
-                                }
-                            
-                            if (llmDownloadProgress >= 0.99f) break
-                        } catch (e: Exception) {
-                            errorMessage = "Download error: ${e.message}"
-                        }
-                        
-                        retryCount++
-                        if (retryCount < maxRetries && llmDownloadProgress < 0.99f) {
-                            kotlinx.coroutines.delay(500)
-                        }
-                    }
-
-                    isLLMDownloading = false
-                }
-                
-                isLLMLoading = true
-                RunAnywhere.loadLLMModel(LLM_MODEL_ID)
-                isLLMLoaded = true
-                isLLMLoading = false
-                
-                refreshModelState()
-            } catch (e: Exception) {
-                errorMessage = "LLM load failed: ${e.message}"
-                isLLMDownloading = false
-                isLLMLoading = false
-            }
+            loadLLMInternal(allowDownload = true, clearErrors = true)
         }
     }
     
@@ -241,6 +214,7 @@ class ModelService : ViewModel() {
                 errorMessage = null
                 
                 if (!isModelDownloaded(STT_MODEL_ID)) {
+                    isSTTDownloaded = false
                     isSTTDownloading = true
                     sttDownloadProgress = 0f
                     
@@ -275,6 +249,7 @@ class ModelService : ViewModel() {
                     }
                     
                     isSTTDownloading = false
+                    isSTTDownloaded = true
                 }
                 
                 isSTTLoading = true
@@ -287,6 +262,7 @@ class ModelService : ViewModel() {
                 errorMessage = "STT load failed: ${e.message}"
                 isSTTDownloading = false
                 isSTTLoading = false
+                refreshModelState()
             }
         }
     }
@@ -303,6 +279,7 @@ class ModelService : ViewModel() {
                 
                 // Check if already downloaded
                 if (!isModelDownloaded(TTS_MODEL_ID)) {
+                    isTTSDownloaded = false
                     isTTSDownloading = true
                     ttsDownloadProgress = 0f
                     
@@ -315,6 +292,7 @@ class ModelService : ViewModel() {
                         }
                     
                     isTTSDownloading = false
+                    isTTSDownloaded = true
                 }
                 
                 // Load the model
@@ -328,6 +306,7 @@ class ModelService : ViewModel() {
                 errorMessage = "TTS load failed: ${e.message}"
                 isTTSDownloading = false
                 isTTSLoading = false
+                refreshModelState()
             }
         }
     }
@@ -336,40 +315,8 @@ class ModelService : ViewModel() {
      * Download and load VLM model (SmolVLM 256M - multimodal with mmproj)
      */
     fun downloadAndLoadVLM() {
-        if (isVLMDownloading || isVLMLoading) return
-        
         viewModelScope.launch {
-            try {
-                errorMessage = null
-                
-                if (!isModelDownloaded(VLM_MODEL_ID)) {
-                    isVLMDownloading = true
-                    vlmDownloadProgress = 0f
-                    
-                    RunAnywhere.downloadModel(VLM_MODEL_ID)
-                        .catch { e ->
-                            errorMessage = "VLM download failed: ${e.message}"
-                        }
-                        .collect { progress ->
-                            vlmDownloadProgress = progress.progress
-                        }
-                    
-                    isVLMDownloading = false
-                }
-                
-                // Load the VLM model by ID -- C++ resolves the model folder,
-                // finds main .gguf and mmproj .gguf automatically
-                isVLMLoading = true
-                RunAnywhere.loadVLMModel(VLM_MODEL_ID)
-                isVLMLoaded = true
-                isVLMLoading = false
-                
-                refreshModelState()
-            } catch (e: Exception) {
-                errorMessage = "VLM load failed: ${e.message}"
-                isVLMDownloading = false
-                isVLMLoading = false
-            }
+            loadVLMInternal(allowDownload = true, clearErrors = true)
         }
     }
     
@@ -406,5 +353,121 @@ class ModelService : ViewModel() {
      */
     fun clearError() {
         errorMessage = null
+    }
+
+    private suspend fun loadLLMInternal(allowDownload: Boolean, clearErrors: Boolean) {
+        if (isLLMDownloading || isLLMLoading || isLLMLoaded) {
+            refreshModelState()
+            return
+        }
+
+        try {
+            if (clearErrors) errorMessage = null
+
+            if (!isModelDownloaded(LLM_MODEL_ID)) {
+                if (!allowDownload) {
+                    isLLMDownloaded = false
+                    return
+                }
+
+                isLLMDownloaded = false
+                isLLMDownloading = true
+                llmDownloadProgress = 0f
+
+                var retryCount = 0
+                val maxRetries = 3
+
+                while (retryCount < maxRetries && llmDownloadProgress < 0.99f) {
+                    try {
+                        RunAnywhere.downloadModel(LLM_MODEL_ID)
+                            .catch { e ->
+                                if (retryCount < maxRetries - 1) {
+                                    errorMessage = "Retrying download... (Attempt ${retryCount + 2}/$maxRetries)"
+                                } else {
+                                    errorMessage = "Download failed: ${e.message}"
+                                }
+                            }
+                            .collect { progress ->
+                                if (progress.progress >= llmDownloadProgress) {
+                                    llmDownloadProgress = progress.progress.coerceIn(0f, 1f)
+                                }
+                            }
+
+                        if (llmDownloadProgress >= 0.99f) break
+                    } catch (e: Exception) {
+                        errorMessage = "Download error: ${e.message}"
+                    }
+
+                    retryCount++
+                    if (retryCount < maxRetries && llmDownloadProgress < 0.99f) {
+                        kotlinx.coroutines.delay(500)
+                    }
+                }
+
+                isLLMDownloading = false
+                isLLMDownloaded = llmDownloadProgress >= 0.99f || isModelDownloaded(LLM_MODEL_ID)
+            } else {
+                isLLMDownloaded = true
+            }
+
+            if (!isLLMDownloaded) return
+
+            isLLMLoading = true
+            RunAnywhere.loadLLMModel(LLM_MODEL_ID)
+            isLLMLoaded = true
+        } catch (e: Exception) {
+            errorMessage = "LLM load failed: ${e.message}"
+        } finally {
+            isLLMDownloading = false
+            isLLMLoading = false
+            refreshModelState()
+        }
+    }
+
+    private suspend fun loadVLMInternal(allowDownload: Boolean, clearErrors: Boolean) {
+        if (isVLMDownloading || isVLMLoading || isVLMLoaded) {
+            refreshModelState()
+            return
+        }
+
+        try {
+            if (clearErrors) errorMessage = null
+
+            if (!isModelDownloaded(VLM_MODEL_ID)) {
+                if (!allowDownload) {
+                    isVLMDownloaded = false
+                    return
+                }
+
+                isVLMDownloaded = false
+                isVLMDownloading = true
+                vlmDownloadProgress = 0f
+
+                RunAnywhere.downloadModel(VLM_MODEL_ID)
+                    .catch { e ->
+                        errorMessage = "VLM download failed: ${e.message}"
+                    }
+                    .collect { progress ->
+                        vlmDownloadProgress = progress.progress.coerceIn(0f, 1f)
+                    }
+
+                isVLMDownloading = false
+                isVLMDownloaded = vlmDownloadProgress >= 0.99f || isModelDownloaded(VLM_MODEL_ID)
+            } else {
+                isVLMDownloaded = true
+            }
+
+            if (!isVLMDownloaded) return
+
+            isVLMLoading = true
+            RunAnywhere.loadVLMModel(VLM_MODEL_ID)
+            isVLMLoaded = true
+        } catch (e: Exception) {
+            errorMessage = "VLM load failed: ${e.message}"
+        } finally {
+            isVLMDownloading = false
+            isVLMLoading = false
+            refreshModelState()
+        }
     }
 }

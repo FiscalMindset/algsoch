@@ -154,6 +154,7 @@ fun TextToSpeechScreen(
                     isDownloading = modelService.isTTSDownloading,
                     isLoading = modelService.isTTSLoading,
                     isLoaded = modelService.isTTSLoaded,
+                    isDownloaded = modelService.isTTSDownloaded,
                     downloadProgress = modelService.ttsDownloadProgress,
                     onLoadClick = { modelService.downloadAndLoadTTS() }
                 )

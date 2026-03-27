@@ -15,6 +15,7 @@ fun ModelLoaderWidget(
     isDownloading: Boolean,
     isLoading: Boolean,
     isLoaded: Boolean,
+    isDownloaded: Boolean = false,
     downloadProgress: Float,
     onLoadClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -45,10 +46,11 @@ fun ModelLoaderWidget(
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = when {
-                            isLoaded -> "Ready"
+                            isLoaded -> "Loaded and ready"
                             isLoading -> "Loading..."
                             isDownloading -> "Downloading ${(downloadProgress * 100).toInt()}%"
-                            else -> "Not loaded"
+                            isDownloaded -> "Downloaded. Tap load if it did not auto-restore."
+                            else -> "Not downloaded yet"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = when {
@@ -67,7 +69,13 @@ fun ModelLoaderWidget(
                             containerColor = MaterialTheme.colorScheme.primary
                         )
                     ) {
-                        Text(if (isDownloading || isLoading) "Loading..." else "Load")
+                        Text(
+                            when {
+                                isDownloading || isLoading -> "Loading..."
+                                isDownloaded -> "Load"
+                                else -> "Download & Load"
+                            }
+                        )
                     }
                 }
             }
