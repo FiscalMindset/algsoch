@@ -48,6 +48,14 @@ Algsoch is an **advanced AI-powered study companion** built with **RunAnywhere S
 
 ---
 
+## 🎬 Demo
+
+Check out the video demo of Algsoch in action:
+
+[<img src="https://img.youtube.com/vi/8L3svJ2HgI0/0.jpg" width="50%">](https://youtu.be/8L3svJ2HgI0)
+
+---
+
 ## About RunAnywhere SDK
 
 ### What is RunAnywhere SDK?
