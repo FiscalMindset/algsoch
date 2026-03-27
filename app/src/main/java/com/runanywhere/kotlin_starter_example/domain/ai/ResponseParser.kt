@@ -15,14 +15,22 @@ class ResponseParser {
             .replace(Regex("(?i)^Assistant:\\s*"), "")
             .replace("<|im_end|>", "")
             .replace("<|im_start|>", "")
+            .replace("<end_of_utterance>", "")
+            .replace("</end_of_utterance>", "")
+            .replace(Regex("<\\|eot_id\\|>", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("<\\|end_of_text\\|>", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("<\\|.*?\\|>"), "")
             // Strip VLM metadata tags
             .replace(Regex("(?i)end\\.of\\.utterance"), "")
+            .replace(Regex("(?i)end_of_utterance"), "")
             .replace(Regex("(?i)model\\s+(?:for\\s+)?vision\\s+is\\s+[\\w\\-]+"), "")
             .replace(Regex("(?i)smolvm[\\w\\-]*"), "")
             .replace(Regex("(?i)qwen2?-?vl[\\w\\-]*"), "")
             .replace(Regex("(?i)lfm2?-?vl[\\w\\-]*"), "")
             .replace(Regex("(?i)<\\|vision_start\\|>.*?<\\|vision_end\\|>"), "")
             .replace(Regex("(?i)<vision>.*?</vision>", RegexOption.DOT_MATCHES_ALL), "")
+            .replace(Regex("[ \\t]{2,}"), " ")
+            .replace(Regex("\\n{3,}"), "\n\n")
             .trim()
 
         // 2. Echo Detection: If the model repeats the question at the start, remove it

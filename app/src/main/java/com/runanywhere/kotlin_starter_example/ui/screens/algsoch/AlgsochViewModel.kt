@@ -217,8 +217,14 @@ class AlgsochViewModel : ViewModel() {
     
     fun sendMessage(query: String, imageUri: Uri? = null, isVisionReady: Boolean = true) {
         if (query.isBlank() && imageUri == null || isGenerating) return
-        
-        val userMessage = ChatMessage(text = query, isUser = true, imageUri = imageUri)
+
+        val visibleUserQuery = when {
+            query.isNotBlank() -> query.trim()
+            imageUri != null -> defaultImageQuestion()
+            else -> query
+        }
+
+        val userMessage = ChatMessage(text = visibleUserQuery, isUser = true, imageUri = imageUri)
         messages = messages + userMessage
         
         generationJob = viewModelScope.launch {
@@ -241,8 +247,8 @@ class AlgsochViewModel : ViewModel() {
                     return@launch
                 }
 
-                val finalQuery = if (query.isBlank()) "Describe this image in detail." else query
-                val history = buildConversationHistory(query)
+                val finalQuery = visibleUserQuery
+                val history = buildConversationHistory(finalQuery)
                 
                 val response = aiService.generateAnswer(
                     userQuery = finalQuery,
@@ -840,6 +846,16 @@ class AlgsochViewModel : ViewModel() {
     private fun resolveImagePath(uri: Uri): String? {
         val context = appContext ?: return null
         return try {
+            if (uri.scheme == "file") {
+                val localPath = uri.path
+                if (!localPath.isNullOrBlank()) {
+                    val localFile = java.io.File(localPath)
+                    if (localFile.exists()) {
+                        return localFile.absolutePath
+                    }
+                }
+            }
+
             val mimeType = context.contentResolver.getType(uri)
             val extFromMime = mimeType?.let { MimeTypeMap.getSingleton().getExtensionFromMimeType(it) }
             val extFromUri = MimeTypeMap.getFileExtensionFromUrl(uri.toString())
@@ -858,6 +874,12 @@ class AlgsochViewModel : ViewModel() {
         } catch (_: Exception) {
             null
         }
+    }
+
+    private fun defaultImageQuestion(): String = when (selectedLanguage) {
+        Language.ENGLISH -> "What is in this image?"
+        Language.HINDI -> "Is image mein kya dikh raha hai?"
+        Language.HINGLISH -> "Is image mein kya hai?"
     }
     
     private fun analyzeWritingStyle(queries: List<String>): Map<String, Any> {

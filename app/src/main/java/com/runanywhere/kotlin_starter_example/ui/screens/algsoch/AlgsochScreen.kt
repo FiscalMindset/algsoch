@@ -1,6 +1,7 @@
 package com.runanywhere.kotlin_starter_example.ui.screens.algsoch
 
 import android.net.Uri
+import android.graphics.Bitmap
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -66,6 +67,7 @@ fun AlgsochScreen(
     var showModeSelector by remember { mutableStateOf(false) }
     var showHistory by remember { mutableStateOf(false) }
     var showCustomModeDialog by remember { mutableStateOf(false) }
+    var showImageSourceSheet by remember { mutableStateOf(false) }
     
     // Image selection state
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
@@ -74,6 +76,12 @@ fun AlgsochScreen(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         selectedImageUri = uri
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap ->
+        selectedImageUri = bitmap?.let { saveCapturedBitmapToCache(context, it) } ?: selectedImageUri
     }
 
     LaunchedEffect(Unit) {
@@ -151,7 +159,7 @@ fun AlgsochScreen(
                             }
                         },
                         onCancel = { viewModel.cancelGeneration() },
-                        onImageClick = { imagePickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                        onImageClick = { showImageSourceSheet = true },
                         onModeClick = { showModeSelector = true },
                         selectedMode = viewModel.selectedCustomMode?.name ?: viewModel.selectedMode.displayName(),
                         isGenerating = viewModel.isGenerating,
@@ -183,6 +191,20 @@ fun AlgsochScreen(
             viewModel = viewModel,
             onCreateCustomMode = { showModeSelector = false; showCustomModeDialog = true },
             onDismiss = { showModeSelector = false }
+        )
+    }
+
+    if (showImageSourceSheet) {
+        ImageSourceSheet(
+            onPickFromGallery = {
+                showImageSourceSheet = false
+                imagePickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            },
+            onCapturePhoto = {
+                showImageSourceSheet = false
+                cameraLauncher.launch(null)
+            },
+            onDismiss = { showImageSourceSheet = false }
         )
     }
 
@@ -814,6 +836,99 @@ private fun AssistantItemInSheet(mode: CustomMode, onClick: () -> Unit) {
                         lineHeight = 18.sp
                     )
                 }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ImageSourceSheet(
+    onPickFromGallery: () -> Unit,
+    onCapturePhoto: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = BackgroundDark
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp)
+                .navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                "Add Image",
+                style = MaterialTheme.typography.headlineSmall,
+                color = Color.White,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                "Choose an image from your gallery or capture one live with the camera.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextSecondary,
+                lineHeight = 20.sp
+            )
+
+            ImageSourceOption(
+                title = "Choose From Gallery",
+                description = "Pick an existing photo or screenshot.",
+                icon = Icons.Rounded.PhotoLibrary,
+                accent = AccentBlue,
+                onClick = onPickFromGallery
+            )
+            ImageSourceOption(
+                title = "Capture Live Photo",
+                description = "Open the camera and use a fresh image.",
+                icon = Icons.Rounded.PhotoCamera,
+                accent = AccentGreen,
+                onClick = onCapturePhoto
+            )
+        }
+    }
+}
+
+@Composable
+private fun ImageSourceOption(
+    title: String,
+    description: String,
+    icon: ImageVector,
+    accent: Color,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        color = SurfaceSecondary,
+        shape = RoundedCornerShape(18.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.2f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(42.dp),
+                shape = RoundedCornerShape(14.dp),
+                color = accent.copy(alpha = 0.16f)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(icon, null, tint = accent, modifier = Modifier.size(20.dp))
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, color = Color.White, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    description,
+                    color = TextSecondary,
+                    style = MaterialTheme.typography.bodySmall,
+                    lineHeight = 18.sp
+                )
             }
         }
     }
@@ -1605,6 +1720,21 @@ private fun formatStudyTime(minutes: Int): String {
         "$hours h"
     } else {
         "$hours h $remainingMinutes min"
+    }
+}
+
+private fun saveCapturedBitmapToCache(context: Context, bitmap: Bitmap): Uri? {
+    return try {
+        val outputFile = java.io.File(
+            context.cacheDir,
+            "algsoch_capture_${System.currentTimeMillis()}.jpg"
+        )
+        outputFile.outputStream().use { stream ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 95, stream)
+        }
+        Uri.fromFile(outputFile)
+    } catch (_: Exception) {
+        null
     }
 }
 

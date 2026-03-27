@@ -120,11 +120,15 @@ class AIInferenceService {
             Language.HINGLISH -> "Hinglish"
         }
 
-        val effectiveQuery = userQuery.ifBlank { "Describe the uploaded image in detail." }
+        val effectiveQuery = userQuery.ifBlank { "What is in this image?" }
         return """
             You are an image-grounded assistant.
             Answer only based on the uploaded image and the user query.
             If something is not visible in the image, say it clearly instead of guessing.
+            If the user uploads only an image, assume they want to know the main subject or key content of the image.
+            If the image is a screenshot or document, summarize the screen or content helpfully instead of replying with only one visible label.
+            Do not answer with only a short fragment like a button name.
+            Never include special tokens such as <end_of_utterance> in your reply.
             Respond in $langName.
 
             User query: $effectiveQuery
