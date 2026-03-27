@@ -26,9 +26,16 @@ class ChatHistoryManager(private val context: Context) {
     /**
      * Save chat messages to a JSON file with timestamp
      */
-    suspend fun saveChat(messages: List<ChatMessage>, sessionName: String = "default"): String = 
+    suspend fun saveChat(
+        messages: List<ChatMessage>,
+        sessionName: String = "default",
+        existingSessionPath: String? = null
+    ): String =
         withContext(Dispatchers.IO) {
-            val chatFile = File(chatDir, "${sessionName}_${System.currentTimeMillis()}.json")
+            val chatFile = existingSessionPath
+                ?.takeIf { it.isNotBlank() }
+                ?.let(::File)
+                ?: File(chatDir, "${sanitizeSessionName(sessionName)}.json")
             val jsonContent = messagesToJson(messages)
             chatFile.writeText(jsonContent)
             chatFile.absolutePath
@@ -38,21 +45,21 @@ class ChatHistoryManager(private val context: Context) {
      * Load all chat sessions
      */
     suspend fun loadAllChatSessions(): List<ChatSession> = withContext(Dispatchers.IO) {
-        chatDir.listFiles()?.map { file ->
+        listCanonicalSessionFiles().map { file ->
             ChatSession(
-                name = file.nameWithoutExtension,
+                name = canonicalSessionName(file.nameWithoutExtension),
                 path = file.absolutePath,
                 lastModified = file.lastModified(),
                 messageCount = jsonToMessages(file.readText()).size
             )
-        }?.sortedByDescending { it.lastModified } ?: emptyList()
+        }.sortedByDescending { it.lastModified }
     }
 
     /**
      * Aggregate chat statistics across all saved sessions.
      */
     suspend fun getGlobalStats(): GlobalChatStats = withContext(Dispatchers.IO) {
-        val files = chatDir.listFiles()?.filter { it.isFile && it.extension == "json" } ?: emptyList()
+        val files = listCanonicalSessionFiles()
         var totalMessages = 0
         var totalQuestions = 0
 
@@ -74,7 +81,7 @@ class ChatHistoryManager(private val context: Context) {
      */
     suspend fun loadAllMessages(): List<ChatMessage> = withContext(Dispatchers.IO) {
         val allMessages = mutableListOf<ChatMessage>()
-        val files = chatDir.listFiles()?.filter { it.isFile && it.extension == "json" } ?: emptyList()
+        val files = listCanonicalSessionFiles()
         
         files.forEach { file ->
             try {
@@ -135,13 +142,56 @@ class ChatHistoryManager(private val context: Context) {
      */
     suspend fun deleteChatSession(sessionPath: String): Boolean = 
         withContext(Dispatchers.IO) {
-            File(sessionPath).delete()
+            val targetFile = File(sessionPath)
+            val canonicalName = canonicalSessionName(targetFile.nameWithoutExtension)
+            val relatedFiles = listSessionFiles().filter {
+                canonicalSessionName(it.nameWithoutExtension) == canonicalName
+            }
+
+            relatedFiles.fold(true) { deletedAll, file ->
+                file.delete() && deletedAll
+            }
         }
     
     /**
      * Get chat export directory path for file access
      */
     fun getChatDirectoryPath(): String = chatDir.absolutePath
+
+    private fun listSessionFiles(): List<File> =
+        chatDir.listFiles()?.filter { it.isFile && it.extension == "json" } ?: emptyList()
+
+    private fun listCanonicalSessionFiles(): List<File> =
+        listSessionFiles()
+            .groupBy { canonicalSessionName(it.nameWithoutExtension) }
+            .values
+            .mapNotNull { snapshots -> snapshots.maxByOrNull { it.lastModified() } }
+
+    private fun canonicalSessionName(fileNameWithoutExtension: String): String {
+        val parts = fileNameWithoutExtension.split("_")
+        var trailingTimestamps = 0
+
+        for (index in parts.indices.reversed()) {
+            if (parts[index].matches(Regex("\\d{13}"))) {
+                trailingTimestamps++
+            } else {
+                break
+            }
+        }
+
+        if (trailingTimestamps <= 1) {
+            return fileNameWithoutExtension
+        }
+
+        val partsToKeep = parts.size - (trailingTimestamps - 1)
+        return parts.take(partsToKeep).joinToString("_")
+    }
+
+    private fun sanitizeSessionName(sessionName: String): String =
+        sessionName
+            .trim()
+            .ifBlank { "chat_${System.currentTimeMillis()}" }
+            .replace(Regex("[^A-Za-z0-9._-]"), "_")
     
     private fun messagesToJson(messages: List<ChatMessage>): String {
         return buildString {
@@ -240,4 +290,3 @@ data class GlobalChatStats(
     val totalMessages: Int,
     val totalQuestions: Int
 )
-

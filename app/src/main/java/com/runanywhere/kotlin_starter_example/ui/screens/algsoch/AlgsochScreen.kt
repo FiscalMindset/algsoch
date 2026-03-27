@@ -821,9 +821,18 @@ private fun PremiumAnalyticsDialog(
     val topicsCovered = (data["topicsCovered"] as? Number)?.toInt() ?: 0
     val timeSpentMinutes = (data["timeSpentMinutes"] as? Number)?.toInt() ?: 0
     val avgResponseTimeMs = (data["avgResponseTime"] as? Number)?.toLong() ?: 0L
+    val activeDays = (data["activeDays"] as? Number)?.toInt() ?: 0
+    val currentStudyStreak = (data["currentStudyStreak"] as? Number)?.toInt() ?: 0
+    val longestStudyStreak = (data["longestStudyStreak"] as? Number)?.toInt() ?: 0
+    val questionsThisWeek = (data["questionsThisWeek"] as? Number)?.toInt() ?: 0
+    val avgQuestionsPerActiveDay = (data["avgQuestionsPerActiveDay"] as? Number)?.toDouble() ?: 0.0
+    val avgMessagesPerSession = (data["avgMessagesPerSession"] as? Number)?.toDouble() ?: 0.0
+    val peakStudyWindow = data["peakStudyWindow"]?.toString()?.takeUnless { it.isBlank() || it == "null" } ?: "No data yet"
+    val topTopic = data["topTopic"]?.toString()?.takeUnless { it.isBlank() || it == "null" } ?: "General Learning"
     val preferredMode = data["preferredMode"]?.toString()?.takeUnless { it.isBlank() || it == "null" } ?: "Answer"
     val preferredLanguage = data["preferredLanguage"]?.toString()?.takeUnless { it.isBlank() || it == "null" } ?: "English"
     val preferredLevel = data["preferredLevel"]?.toString()?.takeUnless { it.isBlank() || it == "null" } ?: "Smart"
+    val topicInsights = (data["topicInsights"] as? List<*>)?.mapNotNull { it as? TopicInsight }.orEmpty()
     val topicsList = (data["topicsList"] as? List<*>)?.mapNotNull { it?.toString()?.takeIf(String::isNotBlank) }.orEmpty()
     val writingStyle = data["writingStyle"] as? Map<*, *>
     val queryStyle = writingStyle?.get("queryStyle")?.toString()?.takeUnless { it.isBlank() || it == "null" } ?: "Balanced"
@@ -951,7 +960,7 @@ private fun PremiumAnalyticsDialog(
                             AnalyticsHighlightCard(
                                 label = "Time Spent Learning",
                                 value = formatStudyTime(timeSpentMinutes),
-                                supportingText = if (timeSpentMinutes > 0) "Spread across $totalSessions sessions" else "Start chatting to build your timeline",
+                                supportingText = if (timeSpentMinutes > 0) "Most active topic: $topTopic" else "Start chatting to build your timeline",
                                 icon = Icons.Rounded.Schedule,
                                 color = AccentOrange,
                                 modifier = Modifier.fillMaxWidth()
@@ -997,6 +1006,65 @@ private fun PremiumAnalyticsDialog(
                     }
 
                     AnalyticsSectionHeader(
+                        title = "Study Habits",
+                        subtitle = "How regularly and when you tend to learn"
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        StatBox(
+                            label = "Current Streak",
+                            value = if (currentStudyStreak > 0) "$currentStudyStreak days" else "0 days",
+                            color = AccentOrange,
+                            icon = Icons.Rounded.Bolt,
+                            modifier = Modifier.weight(1f),
+                            supportingText = "Consecutive active study days"
+                        )
+                        StatBox(
+                            label = "Longest Streak",
+                            value = if (longestStudyStreak > 0) "$longestStudyStreak days" else "0 days",
+                            color = AccentPink,
+                            icon = Icons.Rounded.History,
+                            modifier = Modifier.weight(1f),
+                            supportingText = "Best run so far"
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        StatBox(
+                            label = "Active Days",
+                            value = activeDays.toString(),
+                            color = AccentGreen,
+                            icon = Icons.Rounded.CalendarMonth,
+                            modifier = Modifier.weight(1f),
+                            supportingText = "Days with study activity"
+                        )
+                        StatBox(
+                            label = "This Week",
+                            value = questionsThisWeek.toString(),
+                            color = AccentBlue,
+                            icon = Icons.Rounded.DateRange,
+                            modifier = Modifier.weight(1f),
+                            supportingText = "Questions asked in the last 7 days"
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        StatBox(
+                            label = "Peak Study Time",
+                            value = peakStudyWindow,
+                            color = AccentCyan,
+                            icon = Icons.Rounded.Schedule,
+                            modifier = Modifier.weight(1f),
+                            supportingText = "Your busiest study hour"
+                        )
+                        StatBox(
+                            label = "Questions / Active Day",
+                            value = String.format("%.1f", avgQuestionsPerActiveDay),
+                            color = AccentViolet,
+                            icon = Icons.Rounded.Analytics,
+                            modifier = Modifier.weight(1f),
+                            supportingText = "Average daily intensity"
+                        )
+                    }
+
+                    AnalyticsSectionHeader(
                         title = "Study Profile",
                         subtitle = "Patterns the app can infer from your questions"
                     )
@@ -1027,6 +1095,24 @@ private fun PremiumAnalyticsDialog(
                                     icon = Icons.Rounded.Analytics,
                                     modifier = Modifier.weight(1f),
                                     supportingText = "Average pace"
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                StatBox(
+                                    label = "Messages / Session",
+                                    value = String.format("%.1f", avgMessagesPerSession),
+                                    color = AccentCyan,
+                                    icon = Icons.Rounded.ChatBubbleOutline,
+                                    modifier = Modifier.weight(1f),
+                                    supportingText = "Conversation depth"
+                                )
+                                StatBox(
+                                    label = "Top Topic",
+                                    value = topTopic,
+                                    color = AccentGreen,
+                                    icon = Icons.Rounded.LocalOffer,
+                                    modifier = Modifier.weight(1f),
+                                    supportingText = "Most repeated study theme"
                                 )
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1080,20 +1166,47 @@ private fun PremiumAnalyticsDialog(
                         }
                     } else {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            topicsList.chunked(2).forEach { topicRow ->
+                            topicInsights.take(6).forEachIndexed { index, topic ->
+                                TopicInsightCard(
+                                    rank = index + 1,
+                                    topic = topic,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+
+                            if (topicInsights.isEmpty()) {
+                                topicsList.chunked(2).forEach { topicRow ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        topicRow.forEach { topic ->
+                                            AnalyticsTag(
+                                                label = topic,
+                                                color = AccentCyan,
+                                                icon = Icons.Rounded.LocalOffer,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                        if (topicRow.size == 1) {
+                                            Spacer(Modifier.weight(1f))
+                                        }
+                                    }
+                                }
+                            } else {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    topicRow.forEach { topic ->
+                                    topicInsights.drop(6).take(2).forEach { topic ->
                                         AnalyticsTag(
-                                            label = topic,
+                                            label = topic.name,
                                             color = AccentCyan,
                                             icon = Icons.Rounded.LocalOffer,
                                             modifier = Modifier.weight(1f)
                                         )
                                     }
-                                    if (topicRow.size == 1) {
+                                    if (topicInsights.drop(6).take(2).size == 1) {
                                         Spacer(Modifier.weight(1f))
                                     }
                                 }
@@ -1239,6 +1352,59 @@ private fun AnalyticsTag(
                 color = Color.White,
                 fontWeight = FontWeight.Medium
             )
+        }
+    }
+}
+
+@Composable
+private fun TopicInsightCard(
+    rank: Int,
+    topic: TopicInsight,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = SurfaceSecondary,
+        shape = RoundedCornerShape(18.dp),
+        modifier = modifier,
+        border = androidx.compose.foundation.BorderStroke(1.dp, AccentBlue.copy(alpha = 0.12f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(36.dp),
+                shape = CircleShape,
+                color = AccentBlue.copy(alpha = 0.16f)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(rank.toString(), color = AccentBlue, fontWeight = FontWeight.Bold)
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    topic.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "${topic.mentionCount} matching signals",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
+                if (topic.matchedKeywords.isNotEmpty()) {
+                    Text(
+                        "Matched: ${topic.matchedKeywords.joinToString(", ")}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextMuted,
+                        lineHeight = 18.sp
+                    )
+                }
+            }
         }
     }
 }

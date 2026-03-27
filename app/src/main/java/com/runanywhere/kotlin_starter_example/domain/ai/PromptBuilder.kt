@@ -152,18 +152,32 @@ $userQuery<|im_end|>
             - Write flowing paragraphs and use natural breaks where they make sense
             - Keep responses concise but complete
             - ALWAYS end with one sentence that ties it to student learning
+            - Use recent chat turns and remembered past-chat details only when they are relevant to the new question
+            - If remembered details seem unrelated or uncertain, ignore them instead of forcing them in
         """.trimIndent()
 
         // Build conversation history context
         val historyContext = if (conversationHistory.isNotEmpty()) {
             buildString {
-                append("Context from previous questions in this chat:\n")
-                conversationHistory.forEach { (role, text) ->
-                    // Since we only send user messages, this should be "user" only
-                    val preview = text.take(100)
-                    append("- $preview\n")
+                val rememberedContext = conversationHistory.filter { it.first == "memory" }
+                val recentConversation = conversationHistory.filter { it.first == "user" || it.first == "assistant" }
+
+                if (rememberedContext.isNotEmpty()) {
+                    append("Relevant details remembered from past chats:\n")
+                    rememberedContext.forEach { (_, text) ->
+                        append("- ${text.take(180)}\n")
+                    }
+                    append("\n")
                 }
-                append("\n")
+
+                if (recentConversation.isNotEmpty()) {
+                    append("Recent conversation in this chat:\n")
+                    recentConversation.forEach { (role, text) ->
+                        val speaker = if (role == "assistant") "Assistant" else "User"
+                        append("$speaker: ${text.take(180)}\n")
+                    }
+                    append("\n")
+                }
             }
         } else {
             ""

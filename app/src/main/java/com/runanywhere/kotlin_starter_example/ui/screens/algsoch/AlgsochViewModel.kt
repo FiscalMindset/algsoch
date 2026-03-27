@@ -23,6 +23,10 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.util.Locale
 
 data class ChatMessage(
     val id: Long = System.currentTimeMillis(),
@@ -34,7 +38,61 @@ data class ChatMessage(
     val imageUri: Uri? = null  // Support for image input in messages
 )
 
+data class TopicInsight(
+    val name: String,
+    val mentionCount: Int,
+    val matchedKeywords: List<String> = emptyList()
+)
+
+private data class RelevantMemoryMatch(
+    val text: String,
+    val score: Double,
+    val timestamp: Long
+)
+
+private data class TopicDefinition(
+    val name: String,
+    val keywords: List<String>
+)
+
 class AlgsochViewModel : ViewModel() {
+    companion object {
+        private val systemZone: ZoneId = ZoneId.systemDefault()
+
+        private val stopWords = setOf(
+            "a", "an", "and", "are", "as", "at", "be", "because", "but", "by", "can", "could",
+            "do", "does", "for", "from", "get", "give", "had", "has", "have", "help", "how",
+            "i", "if", "in", "into", "is", "it", "its", "just", "me", "my", "need", "of", "on",
+            "or", "please", "show", "so", "tell", "that", "the", "their", "them", "there",
+            "these", "this", "to", "understand", "us", "use", "using", "want", "was", "we",
+            "what", "when", "where", "which", "who", "why", "with", "would", "you", "your"
+        )
+
+        private val topicCatalog = listOf(
+            TopicDefinition("Dynamic Programming", listOf("dynamic programming", "dp", "memoization", "tabulation")),
+            TopicDefinition("Recursion", listOf("recursion", "recursive", "base case", "recursive tree")),
+            TopicDefinition("Arrays & Strings", listOf("array", "arrays", "string", "substring", "subarray", "prefix sum", "two pointer", "sliding window")),
+            TopicDefinition("Linked Lists", listOf("linked list", "linked lists", "singly linked list", "doubly linked list")),
+            TopicDefinition("Stacks & Queues", listOf("stack", "queue", "deque", "monotonic stack", "priority queue")),
+            TopicDefinition("Trees", listOf("tree", "binary tree", "bst", "heap", "segment tree", "trie")),
+            TopicDefinition("Graphs", listOf("graph", "graphs", "bfs", "dfs", "dijkstra", "topological sort", "union find", "disjoint set")),
+            TopicDefinition("Sorting & Searching", listOf("binary search", "sorting", "sort", "search", "mergesort", "quicksort")),
+            TopicDefinition("Object-Oriented Programming", listOf("oops", "oop", "object oriented", "inheritance", "polymorphism", "encapsulation", "abstraction")),
+            TopicDefinition("Databases & SQL", listOf("sql", "database", "databases", "mysql", "postgres", "join", "index", "normalization")),
+            TopicDefinition("Web Development", listOf("html", "css", "javascript", "react", "node", "frontend", "backend", "rest api")),
+            TopicDefinition("Android Development", listOf("android", "kotlin", "compose", "jetpack", "activity", "fragment", "viewmodel")),
+            TopicDefinition("System Design", listOf("system design", "scalability", "load balancer", "cache", "microservices")),
+            TopicDefinition("Machine Learning", listOf("machine learning", "ml", "neural network", "classification", "regression", "training data", "model")),
+            TopicDefinition("Statistics & Probability", listOf("probability", "statistics", "mean", "median", "variance", "distribution")),
+            TopicDefinition("Mathematics", listOf("math", "mathematics", "algebra", "calculus", "geometry", "equation", "integral", "derivative", "matrix")),
+            TopicDefinition("Physics", listOf("physics", "force", "motion", "energy", "velocity", "acceleration")),
+            TopicDefinition("Chemistry", listOf("chemistry", "molecule", "reaction", "atom", "bond", "acid", "base")),
+            TopicDefinition("Biology", listOf("biology", "cell", "genetics", "evolution", "photosynthesis", "dna")),
+            TopicDefinition("Economics", listOf("economics", "demand", "supply", "inflation", "gdp", "market")),
+            TopicDefinition("History", listOf("history", "war", "empire", "revolution", "civilization")),
+            TopicDefinition("English & Writing", listOf("english", "grammar", "essay", "writing", "literature", "poem"))
+        )
+    }
     
     private val aiService = AIInferenceService()
     private var chatHistoryManager: ChatHistoryManager? = null
@@ -184,12 +242,7 @@ class AlgsochViewModel : ViewModel() {
                 }
 
                 val finalQuery = if (query.isBlank()) "Describe this image in detail." else query
-                
-                // Build conversation history for context - ONLY include user messages to avoid model echoing
-                val history = messages
-                    .filter { it.isUser }  // Only user messages
-                    .takeLast(3)  // Last 3 user messages for context
-                    .map { "user" to it.text }
+                val history = buildConversationHistory(query)
                 
                 val response = aiService.generateAnswer(
                     userQuery = finalQuery,
@@ -249,7 +302,11 @@ class AlgsochViewModel : ViewModel() {
                 else 
                     "chat_${System.currentTimeMillis()}"
                 
-                val savedPath = chatHistoryManager?.saveChat(messages, sessionName)
+                val savedPath = chatHistoryManager?.saveChat(
+                    messages = messages,
+                    sessionName = sessionName,
+                    existingSessionPath = currentSessionPath
+                )
                 if (savedPath != null) {
                     currentSessionPath = savedPath
                     loadChatSessionsListOnly()
@@ -376,7 +433,7 @@ class AlgsochViewModel : ViewModel() {
         // Use calculated values
         val totalQuestions = userMessages.size
         val totalMessages = allMessages.size
-        val totalSessions = chatSessions.size.coerceAtLeast(1)
+        val totalSessions = (globalStats?.totalSessions ?: chatSessions.size).coerceAtLeast(if (allMessages.isNotEmpty()) 1 else 0)
         
         // Mode usage with fallback
         val modeUsage = mutableMapOf<String, Int>()
@@ -410,12 +467,28 @@ class AlgsochViewModel : ViewModel() {
         val avgTokens = if (tokenUsages.isNotEmpty()) tokenUsages.average() else 100.0
         
         // Topics and time
-        val topicsCovered = extractTopics(userMessages.map { it.text })
+        val topicInsights = extractTopics(userMessages.map { it.text })
+        val topicsCovered = topicInsights.size
         val timeSpentMinutes = if (allMessages.size >= 2) {
             val duration = (allMessages.maxOfOrNull { it.timestamp } ?: 0L) - (allMessages.minOfOrNull { it.timestamp } ?: 0L)
             val minutes = (duration / 1000.0 / 60.0).toInt()
             if (minutes == 0 && allMessages.isNotEmpty()) 1 else minutes
         } else 0
+
+        val activeDates = userMessages.map { toLocalDate(it.timestamp) }.toSet()
+        val activeDays = activeDates.size
+        val currentStudyStreak = calculateCurrentStreak(activeDates)
+        val longestStudyStreak = calculateLongestStreak(activeDates)
+        val today = LocalDate.now(systemZone)
+        val questionsThisWeek = userMessages.count { !toLocalDate(it.timestamp).isBefore(today.minusDays(6)) }
+        val avgQuestionsPerActiveDay = if (activeDays > 0) totalQuestions.toDouble() / activeDays else 0.0
+        val avgMessagesPerSession = if (totalSessions > 0) totalMessages.toDouble() / totalSessions else 0.0
+        val peakStudyHour = userMessages
+            .groupingBy { Instant.ofEpochMilli(it.timestamp).atZone(systemZone).hour }
+            .eachCount()
+            .maxByOrNull { it.value }
+            ?.key
+        val peakStudyWindow = formatStudyWindow(peakStudyHour)
         
         // Writing style analysis
         val writingStyle = analyzeWritingStyle(userMessages.map { it.text })
@@ -427,6 +500,7 @@ class AlgsochViewModel : ViewModel() {
         }
         
         return mapOf(
+            "totalSessions" to totalSessions,
             "totalConversations" to totalSessions,
             "totalMessages" to totalMessages,
             "totalQuestions" to totalQuestions,
@@ -440,33 +514,298 @@ class AlgsochViewModel : ViewModel() {
             "preferredLanguage" to selectedLanguage.displayName(),
             "preferredMode" to preferredMode,
             "preferredLevel" to selectedLevel.displayName(),
-            "topicsCovered" to topicsCovered.size,
-            "topicsList" to topicsCovered.toList(),
-            "timeSpentMinutes" to timeSpentMinutes
+            "topicsCovered" to topicsCovered,
+            "topicsList" to topicInsights.map { it.name },
+            "topicInsights" to topicInsights,
+            "topTopic" to (topicInsights.firstOrNull()?.name ?: "General Learning"),
+            "timeSpentMinutes" to timeSpentMinutes,
+            "activeDays" to activeDays,
+            "currentStudyStreak" to currentStudyStreak,
+            "longestStudyStreak" to longestStudyStreak,
+            "questionsThisWeek" to questionsThisWeek,
+            "avgQuestionsPerActiveDay" to avgQuestionsPerActiveDay,
+            "avgMessagesPerSession" to avgMessagesPerSession,
+            "peakStudyWindow" to peakStudyWindow
         )
     }
 
-    private fun extractTopics(queries: List<String>): Set<String> {
-        val topics = mutableSetOf<String>()
-        if (queries.isEmpty()) return topics
-        
-        val topicKeywords = mapOf(
-            "Algorithms" to listOf("algorithm", "sort", "search", "binary", "recursion", "dp", "dynamic"),
-            "Data Structures" to listOf("array", "list", "tree", "graph", "stack", "queue", "hash"),
-            "Programming" to listOf("function", "variable", "loop", "class", "object", "code", "program"),
-            "Math" to listOf("math", "equation", "number", "calculate", "sum", "multiply"),
-            "General" to listOf("what", "how", "why", "explain", "help", "question")
+    private suspend fun buildConversationHistory(currentQuery: String): List<Pair<String, String>> {
+        val recentConversation = messages
+            .dropLast(1)
+            .filter { it.text.isNotBlank() }
+            .takeLast(6)
+            .map { message ->
+                (if (message.isUser) "user" else "assistant") to message.text.trim().take(240)
+            }
+
+        val rememberedContext = findRelevantPastMessages(currentQuery)
+
+        return buildList {
+            rememberedContext.forEach { add("memory" to it) }
+            addAll(recentConversation)
+        }
+    }
+
+    private suspend fun findRelevantPastMessages(query: String): List<String> {
+        if (query.isBlank()) return emptyList()
+
+        val manager = chatHistoryManager ?: return emptyList()
+        val currentFingerprints = messages.map(::messageFingerprint).toSet()
+
+        return manager.loadAllMessages()
+            .filter { it.isUser && it.text.isNotBlank() }
+            .filterNot { messageFingerprint(it) in currentFingerprints }
+            .mapNotNull { message ->
+                val score = scoreHistoricalRelevance(query, message.text)
+                if (score > 1.75) {
+                    RelevantMemoryMatch(message.text.trim(), score, message.timestamp)
+                } else {
+                    null
+                }
+            }
+            .sortedWith(compareByDescending<RelevantMemoryMatch> { it.score }.thenByDescending { it.timestamp })
+            .distinctBy { normalizeText(it.text) }
+            .take(3)
+            .map { it.text.take(220) }
+    }
+
+    private fun extractTopics(queries: List<String>): List<TopicInsight> {
+        val validQueries = queries.map(String::trim).filter { it.length > 2 }
+        if (validQueries.isEmpty()) return emptyList()
+
+        val catalogMatches = topicCatalog.mapNotNull { topic ->
+            val matchedKeywords = mutableSetOf<String>()
+            var score = 0
+
+            validQueries.forEach { query ->
+                val normalizedQuery = normalizeText(query)
+                val queryTokens = extractMeaningfulTokens(query).toSet()
+                val queryMatches = topic.keywords.filter { keyword ->
+                    keywordMatchesQuery(keyword, normalizedQuery, queryTokens)
+                }
+
+                if (queryMatches.isNotEmpty()) {
+                    matchedKeywords += queryMatches
+                    score += queryMatches.size.coerceAtMost(2)
+                }
+            }
+
+            if (score > 0) {
+                TopicInsight(
+                    name = topic.name,
+                    mentionCount = score,
+                    matchedKeywords = matchedKeywords.toList().take(3)
+                )
+            } else {
+                null
+            }
+        }
+
+        val fallbackTopics = extractFallbackTopics(validQueries, catalogMatches)
+        val combinedTopics = (catalogMatches + fallbackTopics)
+            .sortedWith(compareByDescending<TopicInsight> { it.mentionCount }.thenBy { it.name })
+            .take(8)
+
+        return if (combinedTopics.isEmpty()) {
+            listOf(TopicInsight("General Learning", validQueries.size))
+        } else {
+            combinedTopics
+        }
+    }
+
+    private fun extractFallbackTopics(
+        queries: List<String>,
+        existingTopics: List<TopicInsight>
+    ): List<TopicInsight> {
+        val blockedLabels = existingTopics.map { normalizeText(it.name) }.toSet()
+        val phraseScores = mutableMapOf<String, Int>()
+
+        queries.forEach { query ->
+            val tokens = extractMeaningfulTokens(query)
+            val candidatePhrases = mutableSetOf<String>()
+
+            tokens.forEach { token ->
+                if (token.length >= 5) {
+                    candidatePhrases += token
+                }
+            }
+            tokens.windowed(size = 2, step = 1, partialWindows = false).forEach { phraseTokens ->
+                candidatePhrases += phraseTokens.joinToString(" ")
+            }
+            tokens.windowed(size = 3, step = 1, partialWindows = false).forEach { phraseTokens ->
+                candidatePhrases += phraseTokens.joinToString(" ")
+            }
+
+            candidatePhrases.forEach { phrase ->
+                if (isUsefulTopicPhrase(phrase)) {
+                    val label = formatTopicLabel(phrase)
+                    phraseScores[label] = phraseScores.getOrDefault(label, 0) + if (phrase.contains(" ")) 2 else 1
+                }
+            }
+        }
+
+        return phraseScores.entries
+            .asSequence()
+            .filter { (label, score) ->
+                normalizeText(label) !in blockedLabels &&
+                    (label.contains(" ") || score >= 2)
+            }
+            .sortedByDescending { it.value }
+            .take(4)
+            .map { (label, score) -> TopicInsight(label, score) }
+            .toList()
+    }
+
+    private fun scoreHistoricalRelevance(query: String, candidate: String): Double {
+        val queryTokens = extractMeaningfulTokens(query).toSet()
+        val candidateTokens = extractMeaningfulTokens(candidate).toSet()
+        val sharedTokens = queryTokens.intersect(candidateTokens)
+        val sharedPhrases = extractImportantPhrases(query).intersect(extractImportantPhrases(candidate))
+        val sharedTopics = matchedTopicNames(query).intersect(matchedTopicNames(candidate))
+
+        if (sharedTokens.isEmpty() && sharedPhrases.isEmpty() && sharedTopics.isEmpty()) {
+            return 0.0
+        }
+
+        return (sharedTokens.size * 1.2) +
+            (sharedPhrases.size * 2.4) +
+            (sharedTopics.size * 1.8) +
+            if (normalizeText(candidate).contains(normalizeText(query).take(24)) && query.length > 12) 1.0 else 0.0
+    }
+
+    private fun messageFingerprint(message: ChatMessage): String =
+        "${message.isUser}:${message.timestamp}:${normalizeText(message.text)}"
+
+    private fun normalizeText(text: String): String =
+        text.lowercase()
+            .replace(Regex("[^a-z0-9+# ]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+    private fun extractMeaningfulTokens(text: String): List<String> =
+        normalizeText(text)
+            .split(" ")
+            .filter { token ->
+                token.length > 2 &&
+                    token !in stopWords &&
+                    token.any { it.isLetter() }
+            }
+
+    private fun extractImportantPhrases(text: String): Set<String> {
+        val tokens = extractMeaningfulTokens(text)
+        val phrases = mutableSetOf<String>()
+
+        tokens.windowed(size = 2, step = 1, partialWindows = false).forEach { window ->
+            phrases += window.joinToString(" ")
+        }
+        tokens.windowed(size = 3, step = 1, partialWindows = false).forEach { window ->
+            phrases += window.joinToString(" ")
+        }
+
+        return phrases.filterTo(mutableSetOf()) { isUsefulTopicPhrase(it) }
+    }
+
+    private fun keywordMatchesQuery(
+        keyword: String,
+        normalizedQuery: String,
+        queryTokens: Set<String>
+    ): Boolean {
+        val normalizedKeyword = normalizeText(keyword)
+        return if (normalizedKeyword.contains(" ")) {
+            normalizedQuery.contains(normalizedKeyword)
+        } else {
+            normalizedKeyword in queryTokens
+        }
+    }
+
+    private fun matchedTopicNames(text: String): Set<String> {
+        val normalizedText = normalizeText(text)
+        val tokens = extractMeaningfulTokens(text).toSet()
+
+        return topicCatalog.mapNotNull { topic ->
+            if (topic.keywords.any { keywordMatchesQuery(it, normalizedText, tokens) }) {
+                topic.name
+            } else {
+                null
+            }
+        }.toSet()
+    }
+
+    private fun isUsefulTopicPhrase(phrase: String): Boolean {
+        val tokens = phrase.split(" ")
+        if (tokens.isEmpty()) return false
+        if (tokens.all { it in stopWords }) return false
+        if (tokens.any { it.length < 3 }) return false
+
+        val normalizedPhrase = normalizeText(phrase)
+        val blockedPhrases = setOf(
+            "tell me", "help me", "show me", "what is", "how to", "why is",
+            "explain this", "need help", "study this", "want know"
         )
-        
-        val allText = queries.joinToString(" ").lowercase()
-        topicKeywords.forEach { (topic, keywords) ->
-            if (keywords.any { allText.contains(it) }) topics.add(topic)
+
+        return normalizedPhrase.isNotBlank() &&
+            normalizedPhrase !in blockedPhrases &&
+            normalizedPhrase.any { it.isLetter() }
+    }
+
+    private fun formatTopicLabel(phrase: String): String =
+        phrase.split(" ")
+            .joinToString(" ") { token -> token.replaceFirstChar { char -> char.titlecase(Locale.getDefault()) } }
+
+    private fun toLocalDate(timestamp: Long): LocalDate =
+        Instant.ofEpochMilli(timestamp).atZone(systemZone).toLocalDate()
+
+    private fun calculateCurrentStreak(activeDates: Set<LocalDate>): Int {
+        if (activeDates.isEmpty()) return 0
+
+        var streak = 1
+        var cursor = activeDates.maxOrNull() ?: return 0
+
+        while (activeDates.contains(cursor.minusDays(1))) {
+            streak++
+            cursor = cursor.minusDays(1)
         }
-        
-        if (topics.isEmpty() && queries.any { it.trim().length > 3 }) {
-            topics.add("General")
+
+        return streak
+    }
+
+    private fun calculateLongestStreak(activeDates: Set<LocalDate>): Int {
+        if (activeDates.isEmpty()) return 0
+
+        val sortedDates = activeDates.sorted()
+        var longest = 1
+        var current = 1
+
+        for (index in 1 until sortedDates.size) {
+            current = if (sortedDates[index - 1].plusDays(1) == sortedDates[index]) {
+                current + 1
+            } else {
+                1
+            }
+            if (current > longest) {
+                longest = current
+            }
         }
-        return topics
+
+        return longest
+    }
+
+    private fun formatStudyWindow(hour: Int?): String {
+        if (hour == null) return "No data yet"
+
+        val start = formatHour(hour)
+        val end = formatHour((hour + 1) % 24)
+        return "$start - $end"
+    }
+
+    private fun formatHour(hour: Int): String {
+        val normalizedHour = ((hour % 24) + 24) % 24
+        val period = if (normalizedHour < 12) "AM" else "PM"
+        val displayHour = when (val hourOnClock = normalizedHour % 12) {
+            0 -> 12
+            else -> hourOnClock
+        }
+        return "$displayHour $period"
     }
 
     private fun resolveImagePath(uri: Uri): String? {
