@@ -211,7 +211,7 @@ class AlgsochViewModel : ViewModel() {
     fun changeCustomMode(customMode: CustomMode?) {
         selectedCustomMode = customMode
         if (customMode != null) {
-            selectedMode = ResponseMode.DIRECT
+            selectedMode = preferredResponseModeFor(customMode)
         }
     }
     
@@ -944,5 +944,10 @@ class AlgsochViewModel : ViewModel() {
             toolLines.forEach { appendLine(it) }
             appendLine("Use tools when relevant. If a real-time tool call fails, clearly say so and do not hallucinate values.")
         }
+    }
+
+    private fun preferredResponseModeFor(mode: CustomMode): ResponseMode = when (mode.id) {
+        "study_coach" -> ResponseMode.THEORY
+        else -> ResponseMode.EXPLAIN
     }
 }

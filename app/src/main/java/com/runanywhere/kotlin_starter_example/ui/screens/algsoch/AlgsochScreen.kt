@@ -69,6 +69,7 @@ fun AlgsochScreen(
     val context = LocalContext.current
     var showModeSelector by remember { mutableStateOf(false) }
     var showHistory by remember { mutableStateOf(false) }
+    var showModelStatus by remember { mutableStateOf(false) }
     var showCustomModeDialog by remember { mutableStateOf(false) }
     var showImageSourceSheet by remember { mutableStateOf(false) }
     
@@ -96,6 +97,7 @@ fun AlgsochScreen(
             AlgsochTopBar(
                 viewModel = viewModel,
                 onBackClick = onNavigateBack,
+                onModelStatusClick = { showModelStatus = true },
                 onHistoryClick = { showHistory = true },
                 onAnalyticsClick = { viewModel.showAnalytics() }
             )
@@ -104,12 +106,6 @@ fun AlgsochScreen(
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             Column(Modifier.fillMaxSize()) {
-                PrimaryModelStatusPanel(
-                    modelService = modelService,
-                    onLoadChatModel = { modelService.downloadAndLoadLLM() },
-                    onLoadVisionModel = { modelService.downloadAndLoadVLM() }
-                )
-                
                 // Messages
                 LazyColumn(
                     state = listState,
@@ -184,6 +180,15 @@ fun AlgsochScreen(
         )
     }
 
+    if (showModelStatus) {
+        ModelStatusSheet(
+            modelService = modelService,
+            onLoadChatModel = { modelService.downloadAndLoadLLM() },
+            onLoadVisionModel = { modelService.downloadAndLoadVLM() },
+            onDismiss = { showModelStatus = false }
+        )
+    }
+
     if (showModeSelector) {
         PremiumModeSelectorSheet(
             viewModel = viewModel,
@@ -246,13 +251,6 @@ private fun PrimaryModelStatusPanel(
         val stacked = maxWidth < 560.dp
 
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(
-                "Model Status",
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.titleSmall
-            )
-
             if (stacked) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     CompactModelStatusCard(
@@ -327,6 +325,48 @@ private fun PrimaryModelStatusPanel(
                     }
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ModelStatusSheet(
+    modelService: ModelService,
+    onLoadChatModel: () -> Unit,
+    onLoadVisionModel: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = BackgroundDark,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = TextMuted) }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.86f)
+                .navigationBarsPadding()
+        ) {
+            Text(
+                "Model Status",
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+            )
+            Text(
+                "Check whether chat and vision models are downloaded, loading, or ready, and load either one when needed.",
+                color = TextMuted,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(horizontal = 20.dp)
+            )
+
+            PrimaryModelStatusPanel(
+                modelService = modelService,
+                onLoadChatModel = onLoadChatModel,
+                onLoadVisionModel = onLoadVisionModel
+            )
         }
     }
 }
@@ -458,6 +498,7 @@ private fun modelStatusDescription(
 private fun AlgsochTopBar(
     viewModel: AlgsochViewModel,
     onBackClick: () -> Unit,
+    onModelStatusClick: () -> Unit,
     onHistoryClick: () -> Unit,
     onAnalyticsClick: () -> Unit
 ) {
@@ -486,6 +527,9 @@ private fun AlgsochTopBar(
             }
         },
         actions = {
+            IconButton(onClick = onModelStatusClick) {
+                Icon(Icons.Rounded.Memory, null, tint = TextMuted)
+            }
             IconButton(onClick = onAnalyticsClick) {
                 Icon(Icons.Rounded.Analytics, null, tint = TextMuted)
             }
@@ -1246,7 +1290,13 @@ private fun PremiumModeSelectorSheet(
             Text("Your AI Assistants", style = MaterialTheme.typography.labelLarge, color = AccentViolet)
 
             CustomModeStore.getModes().forEach { mode ->
-                AssistantItemInSheet(mode) { viewModel.changeCustomMode(mode); onDismiss() }
+                AssistantItemInSheet(
+                    mode = mode,
+                    isSelected = viewModel.selectedCustomMode?.id == mode.id
+                ) {
+                    viewModel.changeCustomMode(mode)
+                    onDismiss()
+                }
             }
 
             OutlinedButton(
@@ -1266,16 +1316,17 @@ private fun PremiumModeSelectorSheet(
 }
 
 @Composable
-private fun AssistantItemInSheet(mode: CustomMode, onClick: () -> Unit) {
+private fun AssistantItemInSheet(mode: CustomMode, isSelected: Boolean, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
-        color = SurfaceSecondary,
-        shape = RoundedCornerShape(16.dp)
+        color = if (isSelected) AccentViolet.copy(alpha = 0.14f) else SurfaceSecondary,
+        shape = RoundedCornerShape(16.dp),
+        border = if (isSelected) androidx.compose.foundation.BorderStroke(1.dp, AccentViolet) else null
     ) {
         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Rounded.Psychology, null, tint = AccentViolet)
             Spacer(Modifier.width(16.dp))
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(mode.name, color = Color.White, fontWeight = FontWeight.Bold)
                 if (mode.description.isNotBlank()) {
                     Spacer(Modifier.height(2.dp))
@@ -1286,6 +1337,10 @@ private fun AssistantItemInSheet(mode: CustomMode, onClick: () -> Unit) {
                         lineHeight = 18.sp
                     )
                 }
+            }
+            if (isSelected) {
+                Spacer(Modifier.width(12.dp))
+                Icon(Icons.Rounded.CheckCircle, null, tint = AccentViolet, modifier = Modifier.size(20.dp))
             }
         }
     }
