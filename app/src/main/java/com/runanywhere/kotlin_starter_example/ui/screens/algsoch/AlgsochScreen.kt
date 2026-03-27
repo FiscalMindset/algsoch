@@ -133,7 +133,7 @@ fun AlgsochScreen(
                         )
                     }
                     
-                    if (viewModel.isGenerating) {
+                    if (viewModel.isGenerating && viewModel.messages.lastOrNull()?.isPending != true) {
                         item { ThinkingIndicator() }
                     }
                 }
@@ -859,25 +859,50 @@ private fun MessageBubble(
                         val plainText = message.text.ifBlank {
                             "Older reply could not be restored from saved history."
                         }
-                        SelectionContainer {
-                            Text(
-                                text = if (isMissingSavedReply) {
-                                    "Older reply could not be restored from saved history."
-                                } else {
-                                    plainText
-                                },
-                                color = if (isMissingSavedReply || message.text.isBlank()) TextMuted else Color.White,
-                                style = if (isMissingSavedReply) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.fillMaxWidth(),
-                                lineHeight = 1.6.sp
+                        val displayText = if (isMissingSavedReply) {
+                            "Older reply could not be restored from saved history."
+                        } else {
+                            plainText
+                        }
+                        val textColor = if (isMissingSavedReply || message.text.isBlank()) TextMuted else Color.White
+                        val textStyle = if (isMissingSavedReply) {
+                            MaterialTheme.typography.bodySmall.copy(lineHeight = 20.sp)
+                        } else {
+                            MaterialTheme.typography.bodyMedium.copy(
+                                fontSize = 16.sp,
+                                lineHeight = 24.sp
                             )
+                        }
+
+                        if (message.isPending) {
+                            Text(
+                                text = displayText,
+                                color = textColor,
+                                style = textStyle,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 4.dp),
+                                softWrap = true
+                            )
+                        } else {
+                            SelectionContainer {
+                                Text(
+                                    text = displayText,
+                                    color = textColor,
+                                    style = textStyle,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 4.dp),
+                                    softWrap = true
+                                )
+                            }
                         }
                     }
                 }
             }
 
             // Interaction row
-            if (!isMissingSavedReply) {
+            if (!isMissingSavedReply && !message.isPending) {
                 Row(modifier = Modifier.padding(top = 8.dp, start = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     IconButton(onClick = { onFeedback(FeedbackType.LIKE) }, modifier = Modifier.size(36.dp)) {
                         Icon(Icons.Rounded.ThumbUp, null, tint = if (message.feedbackType == FeedbackType.LIKE) AccentGreen else TextMuted, modifier = Modifier.size(18.dp))

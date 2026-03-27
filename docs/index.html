@@ -17,6 +17,7 @@
             <ul class="nav-links">
                 <li><a href="#home">Home</a></li>
                 <li><a href="#features">Features</a></li>
+                <li><a href="#speed">Speed</a></li>
                 <li><a href="#modes">Modes</a></li>
                 <li><a href="#download">Download</a></li>
                 <li><a href="#install">Installation</a></li>
@@ -254,6 +255,65 @@
                     <h3>Analytics</h3>
                     <p>Track your learning stats - questions asked, topics covered, and time spent learning.</p>
                 </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Response Speed Section -->
+    <section id="speed" class="speed-section">
+        <div class="container">
+            <div class="section-header">
+                <h2>Faster Responses on Device</h2>
+                <p>What Algsoch now does behind the scenes to make replies start sooner and feel smoother.</p>
+            </div>
+
+            <div class="speed-grid">
+                <div class="speed-card">
+                    <div class="speed-icon">⚡</div>
+                    <h3>Live Streaming Replies</h3>
+                    <p>Chat responses now stream onto the screen while the model is still generating, so users see words appear earlier instead of waiting for one full block at the end.</p>
+                </div>
+
+                <div class="speed-card">
+                    <div class="speed-icon">🧠</div>
+                    <h3>Warm Model Startup</h3>
+                    <p>After the chat model loads, Algsoch performs a tiny warmup step so the first real question feels less like a cold start.</p>
+                </div>
+
+                <div class="speed-card">
+                    <div class="speed-icon">🧭</div>
+                    <h3>Smarter Tool Routing</h3>
+                    <p>Tool-enabled assistants no longer take the slower tool path for every message. Simple learning questions stay in the faster direct chat path unless tools are actually needed.</p>
+                </div>
+
+                <div class="speed-card">
+                    <div class="speed-icon">💾</div>
+                    <h3>Faster Memory Lookup</h3>
+                    <p>Past conversation retrieval is cached in memory, so Algsoch does not rescan saved chat history from storage for every new message.</p>
+                </div>
+
+                <div class="speed-card">
+                    <div class="speed-icon">📦</div>
+                    <h3>Auto-Load Downloaded Models</h3>
+                    <p>If the chat or vision model is already on the device, Algsoch now restores it automatically on launch instead of making the user press Load again.</p>
+                </div>
+
+                <div class="speed-card">
+                    <div class="speed-icon">✨</div>
+                    <h3>Smoother Streaming UI</h3>
+                    <p>Live replies are rendered in cleaner chunks with better spacing, which reduces jitter and makes ongoing responses easier to read.</p>
+                </div>
+            </div>
+
+            <div class="speed-note">
+                <h3>What Users Should Expect</h3>
+                <ul class="speed-list">
+                    <li>Replies start appearing sooner because text streams live.</li>
+                    <li>Simple questions avoid unnecessary tool overhead.</li>
+                    <li>Past-record context is retrieved faster than before.</li>
+                    <li>Downloaded models open ready more often without extra taps.</li>
+                    <li>Total completion time still depends on phone hardware, current mode, response length, and how much chat history is relevant.</li>
+                </ul>
             </div>
         </div>
     </section>
@@ -721,11 +781,11 @@ RULES FOR STEPS:
                         <div class="why-icon">⚡</div>
                         <h3>Lightning Fast</h3>
                     </div>
-                    <p>Instant responses powered by optimized SmolLM2 model running on your hardware.</p>
+                    <p>Faster-feeling local replies powered by live streaming, model warmup, and smarter routing on your hardware.</p>
                     <ul class="why-benefits">
-                        <li>Sub-second latency</li>
+                        <li>Earlier visible text</li>
                         <li>No server delays</li>
-                        <li>Smooth experience</li>
+                        <li>Smoother response flow</li>
                     </ul>
                 </div>
 

@@ -7,11 +7,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.runanywhere.sdk.core.types.InferenceFramework
 import com.runanywhere.sdk.public.RunAnywhere
+import com.runanywhere.sdk.public.extensions.LLM.LLMGenerationOptions
 import com.runanywhere.sdk.public.extensions.Models.ModelCategory
 import com.runanywhere.sdk.public.extensions.Models.ModelFileDescriptor
 import com.runanywhere.sdk.public.extensions.registerModel
 import com.runanywhere.sdk.public.extensions.registerMultiFileModel
 import com.runanywhere.sdk.public.extensions.downloadModel
+import com.runanywhere.sdk.public.extensions.generate
 import com.runanywhere.sdk.public.extensions.loadLLMModel
 import com.runanywhere.sdk.public.extensions.loadSTTModel
 import com.runanywhere.sdk.public.extensions.loadTTSVoice
@@ -88,6 +90,9 @@ class ModelService : ViewModel() {
     
     var errorMessage by mutableStateOf<String?>(null)
         private set
+
+    private var llmWarmupCompleted = false
+    private var isLLMWarmingUp = false
     
     companion object {
         // Model IDs - using officially supported models
@@ -171,11 +176,17 @@ class ModelService : ViewModel() {
         isTTSDownloaded = isModelDownloaded(TTS_MODEL_ID)
         isVLMDownloaded = isModelDownloaded(VLM_MODEL_ID)
         isVoiceAgentReady = RunAnywhere.isVoiceAgentReady()
+        if (!isLLMLoaded) {
+            llmWarmupCompleted = false
+            isLLMWarmingUp = false
+        }
     }
 
     private suspend fun autoLoadDownloadedPrimaryModels() {
         if (isLLMDownloaded && !isLLMLoaded && !isLLMLoading) {
             loadLLMInternal(allowDownload = false, clearErrors = false)
+        } else if (isLLMLoaded) {
+            warmUpLLMIfNeeded()
         }
 
         if (isVLMDownloaded && !isVLMLoaded && !isVLMLoading) {
@@ -415,6 +426,7 @@ class ModelService : ViewModel() {
             isLLMLoading = true
             RunAnywhere.loadLLMModel(LLM_MODEL_ID)
             isLLMLoaded = true
+            warmUpLLMIfNeeded()
         } catch (e: Exception) {
             errorMessage = "LLM load failed: ${e.message}"
         } finally {
@@ -468,6 +480,26 @@ class ModelService : ViewModel() {
             isVLMDownloading = false
             isVLMLoading = false
             refreshModelState()
+        }
+    }
+
+    private suspend fun warmUpLLMIfNeeded() {
+        if (!isLLMLoaded || llmWarmupCompleted || isLLMWarmingUp) return
+
+        isLLMWarmingUp = true
+        try {
+            RunAnywhere.generate(
+                prompt = "Reply with OK.",
+                options = LLMGenerationOptions(
+                    maxTokens = 8,
+                    temperature = 0f
+                )
+            )
+            llmWarmupCompleted = true
+        } catch (_: Exception) {
+            // Warmup is a best-effort optimization only.
+        } finally {
+            isLLMWarmingUp = false
         }
     }
 }

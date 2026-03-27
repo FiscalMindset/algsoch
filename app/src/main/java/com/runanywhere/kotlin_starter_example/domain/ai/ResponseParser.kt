@@ -6,9 +6,9 @@ import com.runanywhere.kotlin_starter_example.domain.models.ReasoningStep
 import com.runanywhere.kotlin_starter_example.domain.models.StructuredResponse
 
 class ResponseParser {
-    
-    fun parse(rawResponse: String, mode: ResponseMode, language: Language, userQuery: String? = null): StructuredResponse {
-        // 1. Basic cleaning of model artifacts and VLM metadata
+
+    fun sanitizeForDisplay(rawResponse: String, userQuery: String? = null): String {
+        // Remove common model/control artifacts before anything is shown to the user.
         var cleaned = rawResponse
             .replace(Regex("(?i)^Answer:\\s*"), "")
             .replace(Regex("(?i)^Response:\\s*"), "")
@@ -20,7 +20,6 @@ class ResponseParser {
             .replace(Regex("<\\|eot_id\\|>", RegexOption.IGNORE_CASE), "")
             .replace(Regex("<\\|end_of_text\\|>", RegexOption.IGNORE_CASE), "")
             .replace(Regex("<\\|.*?\\|>"), "")
-            // Strip VLM metadata tags
             .replace(Regex("(?i)end\\.of\\.utterance"), "")
             .replace(Regex("(?i)end_of_utterance"), "")
             .replace(Regex("(?i)model\\s+(?:for\\s+)?vision\\s+is\\s+[\\w\\-]+"), "")
@@ -33,15 +32,19 @@ class ResponseParser {
             .replace(Regex("\\n{3,}"), "\n\n")
             .trim()
 
-        // 2. Echo Detection: If the model repeats the question at the start, remove it
         userQuery?.let { query ->
             val trimmedQuery = query.trim().lowercase().removeSuffix("?")
-            if (cleaned.lowercase().startsWith(trimmedQuery)) {
+            if (trimmedQuery.isNotBlank() && cleaned.lowercase().startsWith(trimmedQuery)) {
                 cleaned = cleaned.substring(query.length).trim()
-                // Also remove common separators if they remain at the start
                 cleaned = cleaned.replace(Regex("^[:\\-\\s]+"), "").trim()
             }
         }
+
+        return cleaned
+    }
+    
+    fun parse(rawResponse: String, mode: ResponseMode, language: Language, userQuery: String? = null): StructuredResponse {
+        val cleaned = sanitizeForDisplay(rawResponse, userQuery)
 
         if (cleaned.isBlank()) {
             return StructuredResponse(

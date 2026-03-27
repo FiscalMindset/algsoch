@@ -19,10 +19,12 @@ import com.runanywhere.kotlin_starter_example.domain.models.ReasoningStep
 import com.runanywhere.kotlin_starter_example.services.AIInferenceService
 import com.runanywhere.kotlin_starter_example.services.ToolRegistry
 import com.runanywhere.kotlin_starter_example.data.store.CustomModeStore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -36,7 +38,8 @@ data class ChatMessage(
     var feedbackType: FeedbackType? = null,
     val structuredResponse: com.runanywhere.kotlin_starter_example.domain.models.StructuredResponse? = null,
     val imageUri: Uri? = null,  // Support for image input in messages
-    val assistantLabel: String? = null
+    val assistantLabel: String? = null,
+    val isPending: Boolean = false
 )
 
 data class TopicInsight(
@@ -98,6 +101,9 @@ class AlgsochViewModel : ViewModel() {
     private val aiService = AIInferenceService()
     private var chatHistoryManager: ChatHistoryManager? = null
     private var appContext: Context? = null
+    private var historicalMessagesCache: List<ChatMessage> = emptyList()
+    private var hasHydratedHistoryCache = false
+    private var activeAssistantMessageId: Long? = null
     
     // Current session
     var messages by mutableStateOf<List<ChatMessage>>(emptyList())
@@ -165,6 +171,7 @@ class AlgsochViewModel : ViewModel() {
             chatHistoryManager = ChatHistoryManager(context.applicationContext)
             CustomModeStore.initialize(context.applicationContext)
             loadChatSessionsListOnly()
+            refreshHistoricalMessagesCacheAsync()
         }
     }
     
@@ -239,7 +246,7 @@ class AlgsochViewModel : ViewModel() {
 
         val userMessage = ChatMessage(text = visibleUserQuery, isUser = true, imageUri = imageUri)
         messages = messages + userMessage
-        
+
         generationJob = viewModelScope.launch {
             isGenerating = true
             try {
@@ -263,6 +270,10 @@ class AlgsochViewModel : ViewModel() {
                 val finalQuery = visibleUserQuery
                 val history = buildConversationHistory(finalQuery)
                 val effectiveMode = selectedCustomMode?.let(::preferredResponseModeFor) ?: selectedMode
+                val assistantMessageId = System.currentTimeMillis() + 1
+                val assistantLabel = selectedCustomMode?.name
+
+                appendPendingAssistantMessage(assistantMessageId, assistantLabel)
                 
                 val response = aiService.generateAnswer(
                     userQuery = finalQuery,
@@ -272,16 +283,22 @@ class AlgsochViewModel : ViewModel() {
                     customPrompt = buildCustomPrompt(selectedCustomMode),
                     enabledTools = if (imagePath != null) emptyList() else (selectedCustomMode?.enabledTools ?: emptyList()),
                     imagePath = imagePath,
-                    conversationHistory = history
+                    conversationHistory = history,
+                    onPartialResponse = { partial ->
+                        withContext(Dispatchers.Main.immediate) {
+                            updatePendingAssistantMessage(assistantMessageId, partial)
+                        }
+                    }
                 )
                 
                 val aiMessage = ChatMessage(
+                    id = assistantMessageId,
                     text = response.toDisplayText(),
                     isUser = false,
                     structuredResponse = response,
-                    assistantLabel = selectedCustomMode?.name
+                    assistantLabel = assistantLabel
                 )
-                messages = messages + aiMessage
+                replacePendingAssistantMessage(assistantMessageId, aiMessage)
                 
                 autosaveChat()
                 updateUserStats()
@@ -293,26 +310,35 @@ class AlgsochViewModel : ViewModel() {
                     } else {
                         "Error: ${e.message}"
                     }
-                    messages = messages + ChatMessage(text = errorText, isUser = false)
+                    replacePendingAssistantMessage(
+                        activeAssistantMessageId,
+                        ChatMessage(
+                            text = errorText,
+                            isUser = false,
+                            assistantLabel = selectedCustomMode?.name
+                        )
+                    )
                 }
             } finally {
                 isGenerating = false
+                activeAssistantMessageId = null
                 generationJob = null
             }
         }
     }
     
     fun cancelGeneration() {
+        aiService.cancelActiveGeneration()
         generationJob?.cancel()
+        activeAssistantMessageId?.let { pendingId ->
+            finalizePendingAssistantMessage(
+                pendingId,
+                interruptionNote = "[Response interrupted by user]"
+            )
+        }
         isGenerating = false
         generationJob = null
-        
-        // Add a message indicating generation was stopped by user
-        messages = messages + ChatMessage(
-            text = "[Response interrupted by user]",
-            isUser = false,
-            timestamp = System.currentTimeMillis()
-        )
+        activeAssistantMessageId = null
     }
     
     private fun autosaveChat() {
@@ -330,6 +356,7 @@ class AlgsochViewModel : ViewModel() {
                 )
                 if (savedPath != null) {
                     currentSessionPath = savedPath
+                    refreshHistoricalMessagesCache()
                     loadChatSessionsListOnly()
                 }
             } catch (_: Exception) {}
@@ -375,6 +402,7 @@ class AlgsochViewModel : ViewModel() {
                 if (currentSessionPath == sessionPath) {
                     startNewSession()
                 }
+                refreshHistoricalMessagesCache()
                 loadChatSessionsListOnly()
             } catch (_: Exception) {}
         }
@@ -386,6 +414,8 @@ class AlgsochViewModel : ViewModel() {
                 chatHistoryManager?.deleteAllChatSessions()
                 messages = emptyList()
                 currentSessionPath = null
+                historicalMessagesCache = emptyList()
+                hasHydratedHistoryCache = true
                 loadChatSessionsListOnly()
                 updateUserStats()
             } catch (_: Exception) {}
@@ -454,7 +484,7 @@ class AlgsochViewModel : ViewModel() {
     
     private suspend fun generateAnalyticsData(): Map<String, Any> {
         // Load ALL historical messages
-        val historicalMessages = chatHistoryManager?.loadAllMessages() ?: emptyList()
+        val historicalMessages = ensureHistoricalMessagesCacheLoaded()
         val currentSessionIds = messages.map { it.id }.toSet()
         val uniqueHistoricalMessages = historicalMessages.filter { it.id !in currentSessionIds }
         val allMessages = (messages + uniqueHistoricalMessages).sortedBy { it.timestamp }
@@ -563,7 +593,7 @@ class AlgsochViewModel : ViewModel() {
     }
 
     private suspend fun buildConversationHistory(currentQuery: String): List<Pair<String, String>> {
-        val historicalMessages = (chatHistoryManager?.loadAllMessages() ?: emptyList())
+        val historicalMessages = ensureHistoricalMessagesCacheLoaded()
             .filter { it.text.isNotBlank() }
         val currentFingerprints = messages.map(::messageFingerprint).toSet()
         val previousMessages = historicalMessages.filterNot { messageFingerprint(it) in currentFingerprints }
@@ -964,5 +994,87 @@ class AlgsochViewModel : ViewModel() {
     private fun preferredResponseModeFor(mode: CustomMode): ResponseMode = when (mode.id) {
         "study_coach" -> ResponseMode.THEORY
         else -> ResponseMode.EXPLAIN
+    }
+
+    private suspend fun ensureHistoricalMessagesCacheLoaded(): List<ChatMessage> {
+        if (!hasHydratedHistoryCache) {
+            refreshHistoricalMessagesCache()
+        }
+        return historicalMessagesCache
+    }
+
+    private suspend fun refreshHistoricalMessagesCache() {
+        historicalMessagesCache = chatHistoryManager?.loadAllMessages() ?: emptyList()
+        hasHydratedHistoryCache = true
+    }
+
+    private fun refreshHistoricalMessagesCacheAsync() {
+        viewModelScope.launch {
+            refreshHistoricalMessagesCache()
+        }
+    }
+
+    private fun appendPendingAssistantMessage(messageId: Long, assistantLabel: String?) {
+        activeAssistantMessageId = messageId
+        messages = messages + ChatMessage(
+            id = messageId,
+            text = "Thinking...",
+            isUser = false,
+            assistantLabel = assistantLabel,
+            isPending = true
+        )
+    }
+
+    private fun updatePendingAssistantMessage(messageId: Long, partialText: String) {
+        val visibleText = partialText.ifBlank { "Thinking..." }
+        messages = messages.map { message ->
+            if (message.id == messageId) {
+                message.copy(
+                    text = visibleText,
+                    isPending = true
+                )
+            } else {
+                message
+            }
+        }
+    }
+
+    private fun replacePendingAssistantMessage(messageId: Long?, replacement: ChatMessage) {
+        if (messageId == null) {
+            messages = messages + replacement
+            return
+        }
+
+        val updatedMessages = messages.map { message ->
+            if (message.id == messageId) {
+                replacement.copy(id = messageId, isPending = false)
+            } else {
+                message
+            }
+        }
+
+        messages = if (updatedMessages.any { it.id == messageId }) {
+            updatedMessages
+        } else {
+            messages + replacement.copy(id = messageId, isPending = false)
+        }
+    }
+
+    private fun finalizePendingAssistantMessage(messageId: Long, interruptionNote: String) {
+        messages = messages.map { message ->
+            if (message.id == messageId) {
+                val existingText = message.text.takeUnless { it == "Thinking..." }.orEmpty().trim()
+                val finalText = listOf(existingText, interruptionNote)
+                    .filter { it.isNotBlank() }
+                    .joinToString("\n\n")
+                    .ifBlank { interruptionNote }
+                message.copy(
+                    text = finalText,
+                    isPending = false
+                )
+            } else {
+                message
+            }
+        }
     }
 }

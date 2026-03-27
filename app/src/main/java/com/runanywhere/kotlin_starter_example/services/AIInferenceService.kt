@@ -8,6 +8,7 @@ import com.runanywhere.kotlin_starter_example.domain.ai.ResponseParser
 import com.runanywhere.kotlin_starter_example.domain.models.ReasoningStep
 import com.runanywhere.kotlin_starter_example.domain.models.StructuredResponse
 import com.runanywhere.sdk.public.RunAnywhere
+import com.runanywhere.sdk.public.extensions.LLM.LLMGenerationOptions
 import com.runanywhere.sdk.public.extensions.LLM.RunAnywhereToolCalling
 import com.runanywhere.sdk.public.extensions.LLM.ToolCallingOptions
 import com.runanywhere.sdk.public.extensions.LLM.ToolDefinition
@@ -16,7 +17,9 @@ import com.runanywhere.sdk.public.extensions.LLM.ToolParameterType
 import com.runanywhere.sdk.public.extensions.LLM.ToolValue
 import com.runanywhere.sdk.public.extensions.VLM.VLMGenerationOptions
 import com.runanywhere.sdk.public.extensions.VLM.VLMImage
+import com.runanywhere.sdk.public.extensions.cancelGeneration
 import com.runanywhere.sdk.public.extensions.chat
+import com.runanywhere.sdk.public.extensions.generateStream
 import com.runanywhere.sdk.public.extensions.isLLMModelLoaded
 import com.runanywhere.sdk.public.extensions.isVLMModelLoaded
 import com.runanywhere.sdk.public.extensions.processImageStream
@@ -48,22 +51,25 @@ class AIInferenceService {
         customPrompt: String? = null,
         enabledTools: List<String> = emptyList(),
         imagePath: String? = null,
-        conversationHistory: List<Pair<String, String>> = emptyList()
+        conversationHistory: List<Pair<String, String>> = emptyList(),
+        onPartialResponse: suspend (String) -> Unit = {}
     ): StructuredResponse = withContext(Dispatchers.IO) {
         val prompt = promptBuilder.buildPrompt(userQuery, mode, language, userLevel, customPrompt, conversationHistory)
         val visionPrompt = buildVisionPrompt(userQuery, mode, language)
+        val useVision = !imagePath.isNullOrBlank()
+        val useTools = !useVision && shouldUseTools(userQuery, enabledTools)
         
         // Track response time
         val startTime = System.currentTimeMillis()
         
         // Generate response with proper parameters to avoid sampling issues
-        val rawResponse = if (!imagePath.isNullOrBlank()) {
+        val rawResponse = if (useVision) {
             generateVisionResponse(
-                imagePath,
+                imagePath = imagePath!!,
                 visionPrompt,
                 buildVisionRetryPrompt(userQuery, mode, language)
             )
-        } else if (enabledTools.isNotEmpty()) {
+        } else if (useTools) {
             ensureToolRegistryInitialized()
             val toolContext = "Available tools: ${enabledTools.joinToString(", ")}. Use tools when needed and avoid guessing."
             // Use the mode-specific prompt from PromptBuilder as the base!
@@ -80,7 +86,7 @@ class AIInferenceService {
             )
             result.text
         } else {
-            RunAnywhere.chat(prompt)
+            streamTextResponse(prompt, userQuery, onPartialResponse)
         }
         
         val responseTime = System.currentTimeMillis() - startTime
@@ -94,8 +100,8 @@ class AIInferenceService {
         val modelName = try {
             // Check which model is loaded
             when {
-                !imagePath.isNullOrBlank() && RunAnywhere.isVLMModelLoaded -> "SmolVLM Vision"
-                enabledTools.isNotEmpty() -> "SmolLM2 + Tools"
+                useVision && RunAnywhere.isVLMModelLoaded -> "SmolVLM Vision"
+                useTools -> "SmolLM2 + Tools"
                 RunAnywhere.isLLMModelLoaded() -> "SmolLM2 360M"
                 else -> "Offline Model"
             }
@@ -109,6 +115,14 @@ class AIInferenceService {
             tokensUsed = totalTokens,
             responseTimeMs = responseTime
         )
+    }
+
+    fun cancelActiveGeneration() {
+        try {
+            RunAnywhere.cancelGeneration()
+        } catch (_: Exception) {
+            // Best effort only; the coroutine cancellation path still runs.
+        }
     }
 
     private fun buildVisionPrompt(userQuery: String, mode: ResponseMode, language: Language): String {
@@ -273,6 +287,50 @@ class AIInferenceService {
         }
     }
 
+    private suspend fun streamTextResponse(
+        prompt: String,
+        userQuery: String,
+        onPartialResponse: suspend (String) -> Unit
+    ): String {
+        val options = LLMGenerationOptions(streamingEnabled = true)
+        val rawText = StringBuilder()
+        var lastEmittedText = ""
+        var lastEmissionAt = 0L
+        var lastEmittedLength = 0
+
+        RunAnywhere.generateStream(prompt, options).collect { token ->
+            rawText.append(token)
+            val now = System.currentTimeMillis()
+            val charsSinceLastEmit = rawText.length - lastEmittedLength
+            val tokenEndsChunk = token.any { it.isWhitespace() } ||
+                token.contains('\n') ||
+                token.endsWith(".") ||
+                token.endsWith("!") ||
+                token.endsWith("?") ||
+                token.endsWith(",") ||
+                token.endsWith(":") ||
+                token.endsWith(";")
+            val shouldEmit = (tokenEndsChunk && charsSinceLastEmit >= 10 && now - lastEmissionAt >= 90L) ||
+                (charsSinceLastEmit >= 28 && now - lastEmissionAt >= 220L)
+
+            if (shouldEmit) {
+                val cleaned = responseParser.sanitizeForDisplay(rawText.toString(), userQuery)
+                if (cleaned != lastEmittedText) {
+                    onPartialResponse(cleaned)
+                    lastEmittedText = cleaned
+                    lastEmissionAt = now
+                    lastEmittedLength = rawText.length
+                }
+            }
+        }
+
+        val finalCleaned = responseParser.sanitizeForDisplay(rawText.toString(), userQuery)
+        if (finalCleaned != lastEmittedText) {
+            onPartialResponse(finalCleaned)
+        }
+        return rawText.toString()
+    }
+
     private suspend fun streamVisionResponse(
         image: VLMImage,
         prompt: String,
@@ -303,6 +361,29 @@ class AIInferenceService {
         if (cleaned.length >= 50) score += 1
         if (cleaned.contains(".") || cleaned.contains("!") || cleaned.contains("?")) score += 1
         return score
+    }
+
+    private fun shouldUseTools(userQuery: String, enabledTools: List<String>): Boolean {
+        if (enabledTools.isEmpty()) return false
+
+        val normalized = userQuery.lowercase(Locale.getDefault())
+        val enabled = enabledTools.map { it.lowercase(Locale.getDefault()) }.toSet()
+
+        fun hasTool(vararg ids: String): Boolean = ids.any { it in enabled }
+        fun containsAny(vararg keywords: String): Boolean = keywords.any { normalized.contains(it) }
+
+        val looksLikeMath = Regex("""\d+\s*[-+*/x×÷]\s*\d+|\(\s*\d+|\d+\s*\)|what is \d+|solve\s+\d+""")
+            .containsMatchIn(normalized)
+
+        return when {
+            hasTool("get_weather") && containsAny("weather", "temperature", "forecast", "rain", "humidity") -> true
+            hasTool("get_current_time", "get_time") && containsAny("time", "date", "timezone", "clock", "what time") -> true
+            hasTool("calculate") && (looksLikeMath || containsAny("calculate", "solve", "multiply", "divide", "plus", "minus")) -> true
+            hasTool("unit_convert") && containsAny("convert", "celsius", "fahrenheit", "km", "kilometer", "mile", "meter", "inch", "feet") -> true
+            hasTool("summarize_text") && containsAny("summarize", "summarise", "summary", "tldr", "short note") -> true
+            hasTool("create_quiz") && containsAny("quiz", "mcq", "test me", "practice questions", "flashcard") -> true
+            else -> false
+        }
     }
 
     private suspend fun ensureToolRegistryInitialized() {
