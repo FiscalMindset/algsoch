@@ -38,6 +38,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -531,32 +532,29 @@ private fun MessageBubble(
                             Spacer(Modifier.height(16.dp))
                             HorizontalDivider(color = AccentBlue.copy(alpha = 0.2f), thickness = 1.dp)
                             Spacer(Modifier.height(10.dp))
-                            Row(
+                            Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Text(
-                                    text = "${response.modelName}",
+                                    text = displayModelName(response.modelName),
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = AccentBlue.copy(alpha = 0.7f),
-                                    modifier = Modifier.weight(1f)
+                                    color = AccentBlue.copy(alpha = 0.85f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
-                                if (response.tokensUsed > 0) {
-                                    Text(
-                                        text = "${response.tokensUsed} tokens",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = AccentGreen.copy(alpha = 0.7f)
-                                    )
-                                }
-                                if (response.responseTimeMs > 0) {
-                                    Text(
-                                        text = "${(response.responseTimeMs / 1000f).let { String.format("%.1f", it) }}s",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = AccentCyan.copy(alpha = 0.7f)
-                                    )
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (response.tokensUsed > 0) {
+                                        TinyMetaChip("${response.tokensUsed} tokens")
+                                    }
+                                    if (response.responseTimeMs > 0) {
+                                        TinyMetaChip(formatResponseTime(response.responseTimeMs))
+                                    }
                                 }
                             }
                         }
@@ -1721,6 +1719,12 @@ private fun formatStudyTime(minutes: Int): String {
     } else {
         "$hours h $remainingMinutes min"
     }
+}
+
+private fun displayModelName(modelName: String): String = when {
+    modelName.contains("SmolVLM", ignoreCase = true) -> "Vision Model: $modelName"
+    modelName.contains("SmolLM2", ignoreCase = true) -> "Language Model: $modelName"
+    else -> modelName
 }
 
 private fun saveCapturedBitmapToCache(context: Context, bitmap: Bitmap): Uri? {

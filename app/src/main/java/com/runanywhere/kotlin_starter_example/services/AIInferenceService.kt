@@ -51,20 +51,18 @@ class AIInferenceService {
         conversationHistory: List<Pair<String, String>> = emptyList()
     ): StructuredResponse = withContext(Dispatchers.IO) {
         val prompt = promptBuilder.buildPrompt(userQuery, mode, language, userLevel, customPrompt, conversationHistory)
-        val visionPrompt = buildVisionPrompt(userQuery, language)
+        val visionPrompt = buildVisionPrompt(userQuery, mode, language)
         
         // Track response time
         val startTime = System.currentTimeMillis()
         
         // Generate response with proper parameters to avoid sampling issues
         val rawResponse = if (!imagePath.isNullOrBlank()) {
-            val vlmImage = VLMImage.fromFilePath(imagePath)
-            val options = VLMGenerationOptions(maxTokens = 300)  // Concise image analysis
-            val sb = StringBuilder()
-            RunAnywhere.processImageStream(vlmImage, visionPrompt, options).collect { token ->
-                sb.append(token)
-            }
-            sb.toString()
+            generateVisionResponse(
+                imagePath,
+                visionPrompt,
+                buildVisionRetryPrompt(userQuery, mode, language)
+            )
         } else if (enabledTools.isNotEmpty()) {
             ensureToolRegistryInitialized()
             val toolContext = "Available tools: ${enabledTools.joinToString(", ")}. Use tools when needed and avoid guessing."
@@ -96,13 +94,13 @@ class AIInferenceService {
         val modelName = try {
             // Check which model is loaded
             when {
-                !imagePath.isNullOrBlank() && RunAnywhere.isVLMModelLoaded -> "SmolVLM-256M-Instruct"
-                enabledTools.isNotEmpty() -> "SmolLM2-360M-Instruct + Tools"
-                RunAnywhere.isLLMModelLoaded() -> "SmolLM2-360M-Instruct"
-                else -> "Unknown Model"
+                !imagePath.isNullOrBlank() && RunAnywhere.isVLMModelLoaded -> "SmolVLM Vision"
+                enabledTools.isNotEmpty() -> "SmolLM2 + Tools"
+                RunAnywhere.isLLMModelLoaded() -> "SmolLM2 360M"
+                else -> "Offline Model"
             }
         } catch (e: Exception) {
-            "SmolLM2-360M-Instruct" // Default fallback
+            "SmolLM2 360M" // Default fallback
         }
         
         // Pass userQuery to parse function for echo-detection
@@ -113,26 +111,198 @@ class AIInferenceService {
         )
     }
 
-    private fun buildVisionPrompt(userQuery: String, language: Language): String {
-        val langName = when (language) {
-            Language.ENGLISH -> "English"
-            Language.HINDI -> "Hindi"
-            Language.HINGLISH -> "Hinglish"
-        }
-
-        val effectiveQuery = userQuery.ifBlank { "What is in this image?" }
+    private fun buildVisionPrompt(userQuery: String, mode: ResponseMode, language: Language): String {
+        val langName = languageName(language)
+        val effectiveQuery = userQuery.ifBlank { defaultVisionQuestion(language) }
         return """
-            You are an image-grounded assistant.
-            Answer only based on the uploaded image and the user query.
-            If something is not visible in the image, say it clearly instead of guessing.
-            If the user uploads only an image, assume they want to know the main subject or key content of the image.
-            If the image is a screenshot or document, summarize the screen or content helpfully instead of replying with only one visible label.
-            Do not answer with only a short fragment like a button name.
+            You are Algsoch, an image-grounded AI study companion.
+            Answer only from the uploaded image and the user query.
+            If something is unclear or not visible, say that clearly instead of guessing.
+            If the user uploads only an image, explain the main subject or key content of the image.
+            If the image is a screenshot, document, diagram, or notes page, describe the important visible parts instead of replying with only one small label.
+            Start with the main subject, then include visible text, UI, or structure, then explain the likely meaning or purpose.
+            Never answer with only one or two words.
             Never include special tokens such as <end_of_utterance> in your reply.
+            ${visionModeInstructions(mode, retry = false)}
             Respond in $langName.
 
             User query: $effectiveQuery
         """.trimIndent()
+    }
+
+    private fun buildVisionRetryPrompt(userQuery: String, mode: ResponseMode, language: Language): String {
+        val langName = languageName(language)
+        val effectiveQuery = userQuery.ifBlank { defaultVisionQuestion(language) }
+        return """
+            You are analyzing an uploaded image.
+            The previous answer was too short or too vague. Rewrite it with a fuller, clearer response.
+            Stay grounded in what is visible in the image.
+            If the image is blurry or unclear, say that clearly, but still describe what is visible.
+            Never output special tokens or raw control text.
+            ${visionModeInstructions(mode, retry = true)}
+            Respond in $langName.
+
+            User query: $effectiveQuery
+        """.trimIndent()
+    }
+
+    private fun visionModeInstructions(mode: ResponseMode, retry: Boolean): String = when (mode) {
+        ResponseMode.DIRECT -> if (retry) {
+            """
+            Write 4 complete sentences in a natural conversational style.
+            Answer directly, but still mention the main visual details and what they likely mean.
+            """.trimIndent()
+        } else {
+            """
+            Write 3 to 4 complete sentences in a natural conversational style.
+            Keep it direct, but still mention the key visible details and what they likely mean.
+            """.trimIndent()
+        }
+
+        ResponseMode.ANSWER -> if (retry) {
+            """
+            Start with the direct answer in the first sentence.
+            Then add 3 to 4 short sentences explaining the visible evidence and one practical takeaway.
+            """.trimIndent()
+        } else {
+            """
+            Start with the direct answer in the first sentence.
+            Then add 2 to 3 short sentences explaining the visible evidence and one practical takeaway.
+            """.trimIndent()
+        }
+
+        ResponseMode.EXPLAIN -> if (retry) {
+            """
+            Explain like a teacher in 5 to 6 complete sentences.
+            Move from what is visible, to what it means, to why it matters.
+            """.trimIndent()
+        } else {
+            """
+            Explain like a teacher in 4 to 5 complete sentences.
+            Move from what is visible, to what it means, to why it matters.
+            """.trimIndent()
+        }
+
+        ResponseMode.NOTES -> if (retry) {
+            """
+            Use study-note format only.
+            Start with a short title line.
+            Then write 5 to 7 bullet points beginning with "- ".
+            Include visible details, important text or labels, and the main takeaway.
+            End with "Summary: ..." on its own line.
+            """.trimIndent()
+        } else {
+            """
+            Use study-note format only.
+            Start with a short title line.
+            Then write 4 to 6 bullet points beginning with "- ".
+            Include visible details, important text or labels, and the main takeaway.
+            End with "Summary: ..." on its own line.
+            """.trimIndent()
+        }
+
+        ResponseMode.DIRECTION -> if (retry) {
+            """
+            Use guided steps for how to inspect, read, or understand the image.
+            Write Step 1 through Step 4.
+            Add a short "Tips:" section and a short "Common Mistakes:" section.
+            """.trimIndent()
+        } else {
+            """
+            Use guided steps for how to inspect, read, or understand the image.
+            Write Step 1 through Step 3.
+            Add a short "Tips:" section and a short "Common Mistakes:" section.
+            """.trimIndent()
+        }
+
+        ResponseMode.CREATIVE -> if (retry) {
+            """
+            Write 5 to 6 sentences.
+            Use one memorable analogy or real-life comparison, but stay grounded in the actual image details.
+            End with why the image or concept matters.
+            """.trimIndent()
+        } else {
+            """
+            Write 4 to 5 sentences.
+            Use one memorable analogy or real-life comparison, but stay grounded in the actual image details.
+            End with why the image or concept matters.
+            """.trimIndent()
+        }
+
+        ResponseMode.THEORY -> if (retry) {
+            """
+            Write 6 to 7 complete sentences.
+            Explain the deeper concept shown by the image, connect it to broader ideas, and keep the explanation accurate.
+            """.trimIndent()
+        } else {
+            """
+            Write 5 to 6 complete sentences.
+            Explain the deeper concept shown by the image, connect it to broader ideas, and keep the explanation accurate.
+            """.trimIndent()
+        }
+    }
+
+    private fun languageName(language: Language): String = when (language) {
+        Language.ENGLISH -> "English"
+        Language.HINDI -> "Hindi"
+        Language.HINGLISH -> "Hinglish"
+    }
+
+    private fun defaultVisionQuestion(language: Language): String = when (language) {
+        Language.ENGLISH -> "What is in this image?"
+        Language.HINDI -> "Is image mein kya dikh raha hai?"
+        Language.HINGLISH -> "Is image mein kya hai?"
+    }
+
+    private suspend fun generateVisionResponse(
+        imagePath: String,
+        primaryPrompt: String,
+        retryPrompt: String
+    ): String {
+        val vlmImage = VLMImage.fromFilePath(imagePath)
+        val firstAttempt = streamVisionResponse(vlmImage, primaryPrompt, maxTokens = 420)
+        if (!shouldRetryVisionResponse(firstAttempt)) {
+            return firstAttempt
+        }
+
+        val retryAttempt = streamVisionResponse(vlmImage, retryPrompt, maxTokens = 520)
+        return if (scoreVisionResponse(retryAttempt) >= scoreVisionResponse(firstAttempt)) {
+            retryAttempt
+        } else {
+            firstAttempt
+        }
+    }
+
+    private suspend fun streamVisionResponse(
+        image: VLMImage,
+        prompt: String,
+        maxTokens: Int
+    ): String {
+        val options = VLMGenerationOptions(maxTokens = maxTokens)
+        val sb = StringBuilder()
+        RunAnywhere.processImageStream(image, prompt, options).collect { token ->
+            sb.append(token)
+        }
+        return sb.toString()
+    }
+
+    private fun shouldRetryVisionResponse(response: String): Boolean =
+        scoreVisionResponse(response) < 3
+
+    private fun scoreVisionResponse(response: String): Int {
+        val cleaned = response
+            .replace(Regex("<[^>]+>"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        if (cleaned.isBlank()) return 0
+
+        val words = cleaned.split(" ").filter { it.isNotBlank() }
+        var score = 0
+        if (words.size >= 8) score += 2
+        if (words.size >= 16) score += 1
+        if (cleaned.length >= 50) score += 1
+        if (cleaned.contains(".") || cleaned.contains("!") || cleaned.contains("?")) score += 1
+        return score
     }
 
     private suspend fun ensureToolRegistryInitialized() {
