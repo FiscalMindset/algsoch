@@ -35,7 +35,8 @@ data class ChatMessage(
     val timestamp: Long = System.currentTimeMillis(),
     var feedbackType: FeedbackType? = null,
     val structuredResponse: com.runanywhere.kotlin_starter_example.domain.models.StructuredResponse? = null,
-    val imageUri: Uri? = null  // Support for image input in messages
+    val imageUri: Uri? = null,  // Support for image input in messages
+    val assistantLabel: String? = null
 )
 
 data class TopicInsight(
@@ -207,12 +208,24 @@ class AlgsochViewModel : ViewModel() {
     fun changeLevel(level: UserLevel) {
         selectedLevel = level
     }
-    
+
+    fun applyLaunchSelection(assistantId: String?) {
+        val targetId = assistantId?.trim().orEmpty()
+        if (targetId.isBlank()) {
+            selectedCustomMode = null
+            selectedMode = ResponseMode.DIRECT
+            return
+        }
+
+        val mode = CustomModeStore.getModeById(targetId)
+        selectedCustomMode = mode
+        if (mode == null) {
+            selectedMode = ResponseMode.DIRECT
+        }
+    }
+
     fun changeCustomMode(customMode: CustomMode?) {
         selectedCustomMode = customMode
-        if (customMode != null) {
-            selectedMode = preferredResponseModeFor(customMode)
-        }
     }
     
     fun sendMessage(query: String, imageUri: Uri? = null, isVisionReady: Boolean = true) {
@@ -249,10 +262,11 @@ class AlgsochViewModel : ViewModel() {
 
                 val finalQuery = visibleUserQuery
                 val history = buildConversationHistory(finalQuery)
+                val effectiveMode = selectedCustomMode?.let(::preferredResponseModeFor) ?: selectedMode
                 
                 val response = aiService.generateAnswer(
                     userQuery = finalQuery,
-                    mode = selectedMode,
+                    mode = effectiveMode,
                     language = selectedLanguage,
                     userLevel = selectedLevel,
                     customPrompt = buildCustomPrompt(selectedCustomMode),
@@ -264,7 +278,8 @@ class AlgsochViewModel : ViewModel() {
                 val aiMessage = ChatMessage(
                     text = response.toDisplayText(),
                     isUser = false,
-                    structuredResponse = response
+                    structuredResponse = response,
+                    assistantLabel = selectedCustomMode?.name
                 )
                 messages = messages + aiMessage
                 
@@ -382,7 +397,7 @@ class AlgsochViewModel : ViewModel() {
         userStats = mapOf(
             "totalQuestions" to userMessages.size,
             "preferredLanguage" to selectedLanguage.name,
-            "preferredMode" to selectedMode.name
+            "preferredMode" to (selectedCustomMode?.name ?: selectedMode.displayName())
         )
     }
     
@@ -456,8 +471,8 @@ class AlgsochViewModel : ViewModel() {
         // Mode usage with fallback
         val modeUsage = mutableMapOf<String, Int>()
         aiMessages.forEach { msg ->
-            msg.structuredResponse?.let { response ->
-                val modeName = response.mode.displayName()
+            val modeName = msg.assistantLabel ?: msg.structuredResponse?.mode?.displayName()
+            if (!modeName.isNullOrBlank()) {
                 modeUsage[modeName] = modeUsage.getOrDefault(modeName, 0) + 1
             }
         }

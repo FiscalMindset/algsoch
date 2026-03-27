@@ -1,14 +1,17 @@
 package com.runanywhere.kotlin_starter_example
 
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.runanywhere.kotlin_starter_example.services.ModelService
 import com.runanywhere.kotlin_starter_example.ui.screens.ChatScreen
 import com.runanywhere.kotlin_starter_example.ui.screens.HomeScreen
@@ -77,16 +80,35 @@ fun RunAnywhereApp() {
     ) {
         composable("algsoch_mode_select") {
             AlgsochModeSelectionScreen(
-                onChatSelected = { navController.navigate("algsoch") },
+                onChatSelected = { assistantId ->
+                    val route = assistantId
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { "algsoch?assistantId=${Uri.encode(it)}" }
+                        ?: "algsoch"
+                    navController.navigate(route)
+                },
                 onVoiceSelected = { navController.navigate("voice_pipeline") },
                 onVisionSelected = { navController.navigate("vision") }
             )
         }
         
-        composable("algsoch") {
+        composable(
+            route = "algsoch?assistantId={assistantId}",
+            arguments = listOf(
+                navArgument("assistantId") {
+                    type = NavType.StringType
+                    defaultValue = ""
+                    nullable = true
+                }
+            )
+        ) { backStackEntry ->
+            val assistantId = backStackEntry.arguments
+                ?.getString("assistantId")
+                ?.takeIf { it.isNotBlank() }
             AlgsochScreen(
                 onNavigateBack = { navController.navigate("algsoch_mode_select") },
-                modelService = modelService
+                modelService = modelService,
+                initialAssistantId = assistantId
             )
         }
         composable("home") {

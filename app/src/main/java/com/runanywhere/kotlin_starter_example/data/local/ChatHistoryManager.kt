@@ -213,6 +213,7 @@ class ChatHistoryManager(private val context: Context) {
                 append("    \"timestamp\": ${msg.timestamp},\n")
                 append("    \"isUser\": ${msg.isUser},\n")
                 append("    \"text\": \"${escapeJsonString(storedText)}\",\n")
+                append("    \"assistantLabel\": ${msg.assistantLabel?.let { "\"${escapeJsonString(it)}\"" } ?: "null"},\n")
                 append("    \"feedbackType\": ${msg.feedbackType?.name?.let { "\"$it\"" } ?: "null"}\n")
                 append("  }")
                 if (index < messages.size - 1) append(",")
@@ -237,6 +238,7 @@ class ChatHistoryManager(private val context: Context) {
                         val timestamp = extractJsonValue(objStr, "timestamp").toLongOrNull() ?: System.currentTimeMillis()
                         val isUser = extractJsonValue(objStr, "isUser").toBoolean()
                         val text = extractJsonValue(objStr, "text")
+                        val assistantLabel = extractJsonValue(objStr, "assistantLabel").takeUnless { it == "null" || it.isBlank() }
                         val restoredText = text.ifBlank {
                             if (isUser) "" else "[Older saved reply unavailable]"
                         }
@@ -246,7 +248,8 @@ class ChatHistoryManager(private val context: Context) {
                                 id = timestamp,
                                 text = restoredText,
                                 isUser = isUser,
-                                timestamp = timestamp
+                                timestamp = timestamp,
+                                assistantLabel = assistantLabel
                             )
                         )
                     }

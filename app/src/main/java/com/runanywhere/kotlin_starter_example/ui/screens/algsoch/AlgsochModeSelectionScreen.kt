@@ -30,7 +30,7 @@ import com.runanywhere.kotlin_starter_example.ui.theme.*
 
 @Composable
 fun AlgsochModeSelectionScreen(
-    onChatSelected: () -> Unit,
+    onChatSelected: (String?) -> Unit,
     onVoiceSelected: () -> Unit, // Hidden in UI but kept for Nav compatibility
     onVisionSelected: () -> Unit  // Merged into Chat
 ) {
@@ -115,7 +115,7 @@ fun AlgsochModeSelectionScreen(
                 description = "Chat with AI, upload images for analysis, and solve complex problems in one place.",
                 icon = Icons.Rounded.ChatBubbleOutline,
                 gradient = listOf(AccentBlue, Color(0xFF2563EB)),
-                onClick = onChatSelected
+                onClick = { onChatSelected(null) }
             )
 
             Spacer(Modifier.height(32.dp))
@@ -154,7 +154,7 @@ fun AlgsochModeSelectionScreen(
                     contentPadding = PaddingValues(bottom = 24.dp)
                 ) {
                     items(customModes) { mode ->
-                        AssistantItem(mode, onChatSelected)
+                        AssistantItem(mode) { onChatSelected(mode.id) }
                     }
                 }
             }

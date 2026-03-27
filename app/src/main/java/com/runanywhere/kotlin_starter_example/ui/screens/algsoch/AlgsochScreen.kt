@@ -61,7 +61,8 @@ import java.util.Locale
 fun AlgsochScreen(
     onNavigateBack: () -> Unit,
     modelService: ModelService = viewModel(),
-    viewModel: AlgsochViewModel = viewModel()
+    viewModel: AlgsochViewModel = viewModel(),
+    initialAssistantId: String? = null
 ) {
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
@@ -88,8 +89,9 @@ fun AlgsochScreen(
         selectedImageUri = bitmap?.let { saveCapturedBitmapToCache(context, it) } ?: selectedImageUri
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(initialAssistantId) {
         viewModel.initialize(context)
+        viewModel.applyLaunchSelection(initialAssistantId)
     }
 
     Scaffold(
@@ -516,8 +518,17 @@ private fun AlgsochTopBar(
                 }
                 Spacer(Modifier.width(12.dp))
                 Column {
-                    Text("Smart Chat", style = MaterialTheme.typography.titleMedium, color = Color.White, fontWeight = FontWeight.Bold)
-                    Text(viewModel.selectedLevel.displayName(), style = MaterialTheme.typography.labelSmall, color = AccentBlue)
+                    Text(
+                        viewModel.selectedCustomMode?.name ?: "Smart Chat",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        viewModel.selectedCustomMode?.let { "AI Assistant" } ?: viewModel.selectedLevel.displayName(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AccentBlue
+                    )
                 }
             }
         },
