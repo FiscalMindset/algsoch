@@ -36,10 +36,15 @@ fun AlgsochModeSelectionScreen(
 ) {
     val context = LocalContext.current
     var showCustomModeDialog by remember { mutableStateOf(false) }
+    var showCompanionDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         CustomModeStore.initialize(context.applicationContext)
     }
+
+    val customModes = CustomModeStore.getModes()
+    val companionModes = customModes.filter { CustomModeStore.isCompanionMode(it) }
+    val featuredCompanion = companionModes.lastOrNull()
 
     Box(
         modifier = Modifier
@@ -118,6 +123,38 @@ fun AlgsochModeSelectionScreen(
                 onClick = { onChatSelected(null) }
             )
 
+            Spacer(Modifier.height(18.dp))
+
+            MainActionCard(
+                title = featuredCompanion?.name ?: "Create Companion",
+                subtitle = featuredCompanion?.let { "Continue Companion" } ?: "Girlfriend, Boyfriend, or Partner",
+                description = featuredCompanion?.description
+                    ?: "Choose the relationship style, pick the name, and get a warm companion that remembers chats, moods, and photos over time.",
+                icon = Icons.Rounded.Favorite,
+                gradient = listOf(AccentViolet, Color(0xFFEC4899)),
+                onClick = {
+                    val savedCompanionId = featuredCompanion?.id
+                    if (savedCompanionId != null) {
+                        onChatSelected(savedCompanionId)
+                    } else {
+                        showCompanionDialog = true
+                    }
+                }
+            )
+
+            if (featuredCompanion != null) {
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = { showCompanionDialog = true },
+                    shape = RoundedCornerShape(14.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, AccentViolet)
+                ) {
+                    Icon(Icons.Rounded.Add, null, tint = AccentViolet)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Create Another Companion", color = AccentViolet)
+                }
+            }
+
             Spacer(Modifier.height(32.dp))
 
             // Custom Assistants Section
@@ -144,7 +181,6 @@ fun AlgsochModeSelectionScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            val customModes = CustomModeStore.getModes()
             if (customModes.isEmpty()) {
                 EmptyAssistantsCard { showCustomModeDialog = true }
             } else {
@@ -159,6 +195,28 @@ fun AlgsochModeSelectionScreen(
                 }
             }
         }
+    }
+
+    if (showCustomModeDialog) {
+        CustomAssistantDialog(
+            onDismiss = { showCustomModeDialog = false },
+            onSave = { mode ->
+                CustomModeStore.addMode(mode)
+                showCustomModeDialog = false
+                onChatSelected(mode.id)
+            }
+        )
+    }
+
+    if (showCompanionDialog) {
+        CompanionSetupDialog(
+            onDismiss = { showCompanionDialog = false },
+            onSave = { mode ->
+                CustomModeStore.addMode(mode)
+                showCompanionDialog = false
+                onChatSelected(mode.id)
+            }
+        )
     }
 }
 
@@ -228,6 +286,7 @@ private fun MainActionCard(
 
 @Composable
 private fun AssistantItem(mode: CustomMode, onClick: () -> Unit) {
+    val isCompanion = CustomModeStore.isCompanionMode(mode)
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
@@ -244,10 +303,15 @@ private fun AssistantItem(mode: CustomMode, onClick: () -> Unit) {
             Box(
                 modifier = Modifier
                     .size(40.dp)
-                    .background(AccentViolet.copy(alpha = 0.1f), CircleShape),
+                    .background((if (isCompanion) AccentBlue else AccentViolet).copy(alpha = 0.1f), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Rounded.Psychology, null, tint = AccentViolet, modifier = Modifier.size(20.dp))
+                Icon(
+                    if (isCompanion) Icons.Rounded.Favorite else Icons.Rounded.Psychology,
+                    null,
+                    tint = if (isCompanion) AccentBlue else AccentViolet,
+                    modifier = Modifier.size(20.dp)
+                )
             }
             
             Spacer(Modifier.width(16.dp))
@@ -257,7 +321,20 @@ private fun AssistantItem(mode: CustomMode, onClick: () -> Unit) {
                 Text(mode.description, style = MaterialTheme.typography.labelSmall, color = TextMuted, maxLines = 1)
             }
             
-            if (mode.enabledTools.isNotEmpty()) {
+            if (isCompanion) {
+                Surface(
+                    color = AccentBlue.copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Text(
+                        "Companion",
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AccentBlue,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            } else if (mode.enabledTools.isNotEmpty()) {
                 Surface(
                     color = AccentCyan.copy(alpha = 0.1f),
                     shape = RoundedCornerShape(6.dp)

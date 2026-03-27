@@ -72,6 +72,7 @@ fun AlgsochScreen(
     var showHistory by remember { mutableStateOf(false) }
     var showModelStatus by remember { mutableStateOf(false) }
     var showCustomModeDialog by remember { mutableStateOf(false) }
+    var showCompanionDialog by remember { mutableStateOf(false) }
     var showImageSourceSheet by remember { mutableStateOf(false) }
     
     // Image selection state
@@ -195,6 +196,7 @@ fun AlgsochScreen(
         PremiumModeSelectorSheet(
             viewModel = viewModel,
             onCreateCustomMode = { showModeSelector = false; showCustomModeDialog = true },
+            onCreateCompanion = { showModeSelector = false; showCompanionDialog = true },
             onDismiss = { showModeSelector = false }
         )
     }
@@ -214,11 +216,23 @@ fun AlgsochScreen(
     }
 
     if (showCustomModeDialog) {
-        ModernCustomModeDialog(
+        CustomAssistantDialog(
             onDismiss = { showCustomModeDialog = false },
             onSave = { mode ->
                 CustomModeStore.addMode(mode)
                 showCustomModeDialog = false
+                viewModel.changeCustomMode(mode)
+            }
+        )
+    }
+
+    if (showCompanionDialog) {
+        CompanionSetupDialog(
+            onDismiss = { showCompanionDialog = false },
+            onSave = { mode ->
+                CustomModeStore.addMode(mode)
+                showCompanionDialog = false
+                viewModel.changeCustomMode(mode)
             }
         )
     }
@@ -1280,6 +1294,7 @@ private fun ModernCustomModeDialog(
 private fun PremiumModeSelectorSheet(
     viewModel: AlgsochViewModel,
     onCreateCustomMode: () -> Unit,
+    onCreateCompanion: () -> Unit,
     onDismiss: () -> Unit
 ) {
     ModalBottomSheet(
@@ -1325,6 +1340,20 @@ private fun PremiumModeSelectorSheet(
             Spacer(Modifier.height(8.dp))
             Text("Your AI Assistants", style = MaterialTheme.typography.labelLarge, color = AccentViolet)
 
+            FilledTonalButton(
+                onClick = onCreateCompanion,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = AccentViolet.copy(alpha = 0.16f),
+                    contentColor = AccentViolet
+                )
+            ) {
+                Icon(Icons.Rounded.Favorite, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Create Companion")
+            }
+
             CustomModeStore.getModes().forEach { mode ->
                 AssistantItemInSheet(
                     mode = mode,
@@ -1353,6 +1382,7 @@ private fun PremiumModeSelectorSheet(
 
 @Composable
 private fun AssistantItemInSheet(mode: CustomMode, isSelected: Boolean, onClick: () -> Unit) {
+    val isCompanion = CustomModeStore.isCompanionMode(mode)
     Surface(
         onClick = onClick,
         color = if (isSelected) AccentViolet.copy(alpha = 0.14f) else SurfaceSecondary,
@@ -1360,7 +1390,11 @@ private fun AssistantItemInSheet(mode: CustomMode, isSelected: Boolean, onClick:
         border = if (isSelected) androidx.compose.foundation.BorderStroke(1.dp, AccentViolet) else null
     ) {
         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Rounded.Psychology, null, tint = AccentViolet)
+            Icon(
+                if (isCompanion) Icons.Rounded.Favorite else Icons.Rounded.Psychology,
+                null,
+                tint = if (isCompanion) AccentBlue else AccentViolet
+            )
             Spacer(Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(mode.name, color = Color.White, fontWeight = FontWeight.Bold)

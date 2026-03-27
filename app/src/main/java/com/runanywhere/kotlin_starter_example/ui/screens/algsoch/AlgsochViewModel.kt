@@ -96,6 +96,15 @@ class AlgsochViewModel : ViewModel() {
             TopicDefinition("History", listOf("history", "war", "empire", "revolution", "civilization")),
             TopicDefinition("English & Writing", listOf("english", "grammar", "essay", "writing", "literature", "poem"))
         )
+
+        private val moodKeywordMap = mapOf(
+            "happy" to listOf("happy", "good", "great", "better", "glad", "joy", "fun"),
+            "excited" to listOf("excited", "thrilled", "cant wait", "can't wait", "hyped", "celebrating"),
+            "stressed" to listOf("stressed", "pressure", "overwhelmed", "panic", "burnout", "drained"),
+            "sad" to listOf("sad", "down", "cry", "crying", "hurt", "heartbroken", "upset"),
+            "tired" to listOf("tired", "sleepy", "exhausted", "worn out", "low energy"),
+            "lonely" to listOf("lonely", "alone", "empty", "missing you", "miss you")
+        )
     }
     
     private val aiService = AIInferenceService()
@@ -268,7 +277,7 @@ class AlgsochViewModel : ViewModel() {
                 }
 
                 val finalQuery = visibleUserQuery
-                val history = buildConversationHistory(finalQuery)
+                val history = buildConversationHistory(finalQuery, selectedCustomMode)
                 val effectiveMode = selectedCustomMode?.let(::preferredResponseModeFor) ?: selectedMode
                 val assistantMessageId = System.currentTimeMillis() + 1
                 val assistantLabel = selectedCustomMode?.name
@@ -592,7 +601,10 @@ class AlgsochViewModel : ViewModel() {
         )
     }
 
-    private suspend fun buildConversationHistory(currentQuery: String): List<Pair<String, String>> {
+    private suspend fun buildConversationHistory(
+        currentQuery: String,
+        activeMode: CustomMode? = selectedCustomMode
+    ): List<Pair<String, String>> {
         val historicalMessages = ensureHistoricalMessagesCacheLoaded()
             .filter { it.text.isNotBlank() }
         val currentFingerprints = messages.map(::messageFingerprint).toSet()
@@ -606,11 +618,15 @@ class AlgsochViewModel : ViewModel() {
                 (if (message.isUser) "user" else "assistant") to message.text.trim().take(240)
             }
 
-        val learnerProfileMemory = buildLearnerProfileMemory(previousMessages)
+        val profileMemory = if (CustomModeStore.isCompanionMode(activeMode)) {
+            buildCompanionProfileMemory(previousMessages)
+        } else {
+            buildLearnerProfileMemory(previousMessages)
+        }
         val rememberedContext = findRelevantPastMessages(currentQuery, previousMessages)
 
         return buildList {
-            learnerProfileMemory?.let { add("memory" to it) }
+            profileMemory?.let { add("memory" to it) }
             rememberedContext.forEach { add("memory" to it) }
             addAll(recentConversation)
         }
@@ -640,6 +656,51 @@ class AlgsochViewModel : ViewModel() {
                 append(".")
             }
         }.trim().takeIf { it.isNotBlank() }
+    }
+
+    private fun buildCompanionProfileMemory(previousMessages: List<ChatMessage>): String? {
+        val pastUserMessages = previousMessages.filter { it.isUser && it.text.isNotBlank() }
+        if (pastUserMessages.isEmpty()) return null
+
+        val relationshipStage = inferCompanionRelationshipStage(previousMessages.count { it.text.isNotBlank() })
+        val recentHighlights = pastUserMessages
+            .sortedByDescending { it.timestamp }
+            .map { it.text.trim() }
+            .distinctBy(::normalizeText)
+            .take(3)
+
+        val recentMoods = detectRecentMoods(pastUserMessages.takeLast(8).map { it.text })
+        val recurringPersonalTopics = extractRelationshipTopics(pastUserMessages.map { it.text }).take(3)
+
+        return buildString {
+            append("Relationship memory from earlier chats: ")
+            append("current bond stage feels like ")
+            append(relationshipStage)
+            append(". ")
+            if (recentMoods.isNotEmpty()) {
+                append("the user's recent mood has included ")
+                append(recentMoods.joinToString(", "))
+                append(". ")
+            }
+            if (recurringPersonalTopics.isNotEmpty()) {
+                append("They often talk about ")
+                append(recurringPersonalTopics.joinToString(", "))
+                append(". ")
+            }
+            if (recentHighlights.isNotEmpty()) {
+                append("Recent personal things they shared: ")
+                append(recentHighlights.joinToString(" | ") { it.take(80) })
+                append(".")
+            }
+        }.trim().takeIf { it.isNotBlank() }
+    }
+
+    private fun inferCompanionRelationshipStage(messageCount: Int): String = when {
+        messageCount >= 80 -> "deep, life-partner-level closeness"
+        messageCount >= 36 -> "strong romantic attachment and comfort"
+        messageCount >= 16 -> "growing affection, trust, and emotional closeness"
+        messageCount >= 6 -> "early chemistry with warmth and curiosity"
+        else -> "a new connection that is just starting to become personal"
     }
 
     private fun findRelevantPastMessages(query: String, previousMessages: List<ChatMessage>): List<String> {
@@ -746,6 +807,41 @@ class AlgsochViewModel : ViewModel() {
             .take(4)
             .map { (label, score) -> TopicInsight(label, score) }
             .toList()
+    }
+
+    private fun extractRelationshipTopics(messages: List<String>): List<String> {
+        val blockedTokens = stopWords + setOf(
+            "love", "baby", "babe", "dear", "sweet", "miss", "photo", "picture", "selfie"
+        )
+        val scores = mutableMapOf<String, Int>()
+
+        messages.forEach { message ->
+            extractMeaningfulTokens(message)
+                .filterNot { it in blockedTokens }
+                .forEach { token ->
+                    scores[token] = scores.getOrDefault(token, 0) + 1
+                }
+        }
+
+        return scores.entries
+            .sortedByDescending { it.value }
+            .map { formatTopicLabel(it.key) }
+            .distinct()
+            .take(4)
+    }
+
+    private fun detectRecentMoods(messages: List<String>): List<String> {
+        val normalizedMessages = messages.map(::normalizeText)
+
+        return moodKeywordMap.entries
+            .mapNotNull { (label, keywords) ->
+                if (normalizedMessages.any { message -> keywords.any { keyword -> message.contains(normalizeText(keyword)) } }) {
+                    label
+                } else {
+                    null
+                }
+            }
+            .take(3)
     }
 
     private fun scoreHistoricalRelevance(query: String, candidate: String): Double {
@@ -972,18 +1068,19 @@ class AlgsochViewModel : ViewModel() {
 
     private fun buildCustomPrompt(mode: CustomMode?): String? {
         mode ?: return null
-        if (mode.enabledTools.isEmpty()) return mode.basePrompt
+        val resolvedMode = CustomModeStore.resolveMode(mode)
+        if (resolvedMode.enabledTools.isEmpty()) return resolvedMode.basePrompt
 
-        val toolLines = mode.enabledTools.mapNotNull { toolId ->
+        val toolLines = resolvedMode.enabledTools.mapNotNull { toolId ->
             ToolRegistry.getToolById(toolId)?.let { tool ->
                 "- ${tool.name} (${tool.id}): ${tool.description}. Params: ${tool.parametersDescription}"
             }
         }
 
-        if (toolLines.isEmpty()) return mode.basePrompt
+        if (toolLines.isEmpty()) return resolvedMode.basePrompt
 
         return buildString {
-            appendLine(mode.basePrompt)
+            appendLine(resolvedMode.basePrompt)
             appendLine()
             appendLine("Available tools for this assistant:")
             toolLines.forEach { appendLine(it) }
@@ -993,7 +1090,7 @@ class AlgsochViewModel : ViewModel() {
 
     private fun preferredResponseModeFor(mode: CustomMode): ResponseMode = when (mode.id) {
         "study_coach" -> ResponseMode.THEORY
-        else -> ResponseMode.EXPLAIN
+        else -> if (CustomModeStore.isCompanionMode(mode)) ResponseMode.DIRECT else ResponseMode.EXPLAIN
     }
 
     private suspend fun ensureHistoricalMessagesCacheLoaded(): List<ChatMessage> {

@@ -19,13 +19,14 @@ import com.runanywhere.sdk.public.extensions.VLM.VLMGenerationOptions
 import com.runanywhere.sdk.public.extensions.VLM.VLMImage
 import com.runanywhere.sdk.public.extensions.cancelGeneration
 import com.runanywhere.sdk.public.extensions.chat
-import com.runanywhere.sdk.public.extensions.generateStream
+import com.runanywhere.sdk.public.extensions.generateStreamWithMetrics
 import com.runanywhere.sdk.public.extensions.isLLMModelLoaded
 import com.runanywhere.sdk.public.extensions.isVLMModelLoaded
 import com.runanywhere.sdk.public.extensions.processImageStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlin.math.roundToLong
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -37,6 +38,12 @@ import java.util.TimeZone
 class AIInferenceService {
     private val promptBuilder = PromptBuilder()
     private val responseParser = ResponseParser()
+
+    private data class TextGenerationResult(
+        val rawText: String,
+        val responseTokens: Int,
+        val timeToFirstTokenMs: Long? = null,
+    )
 
     companion object {
         @Volatile
@@ -55,45 +62,56 @@ class AIInferenceService {
         onPartialResponse: suspend (String) -> Unit = {}
     ): StructuredResponse = withContext(Dispatchers.IO) {
         val prompt = promptBuilder.buildPrompt(userQuery, mode, language, userLevel, customPrompt, conversationHistory)
-        val visionPrompt = buildVisionPrompt(userQuery, mode, language)
+        val toolPromptSpec = promptBuilder.buildToolPrompt(userQuery, mode, language, userLevel, customPrompt, conversationHistory)
+        val visionPrompt = buildVisionPrompt(userQuery, mode, language, customPrompt, conversationHistory)
         val useVision = !imagePath.isNullOrBlank()
         val useTools = !useVision && shouldUseTools(userQuery, enabledTools)
+        val textOptions = buildTextGenerationOptions(mode, customPrompt)
         
         // Track response time
         val startTime = System.currentTimeMillis()
         
         // Generate response with proper parameters to avoid sampling issues
-        val rawResponse = if (useVision) {
-            generateVisionResponse(
+        val generationResult = if (useVision) {
+            TextGenerationResult(
+                rawText = generateVisionResponse(
                 imagePath = imagePath!!,
                 visionPrompt,
-                buildVisionRetryPrompt(userQuery, mode, language)
+                buildVisionRetryPrompt(userQuery, mode, language, customPrompt, conversationHistory)
+                ),
+                responseTokens = 0
             )
         } else if (useTools) {
             ensureToolRegistryInitialized()
-            val toolContext = "Available tools: ${enabledTools.joinToString(", ")}. Use tools when needed and avoid guessing."
-            // Use the mode-specific prompt from PromptBuilder as the base!
-            val toolPrompt = prompt.replace("<|im_start|>assistant\n", "") + "\n$toolContext\n\nUse tools if beneficial, but prioritize direct educational explanation."
 
             val result = RunAnywhereToolCalling.generateWithTools(
-                prompt = toolPrompt,
+                prompt = toolPromptSpec.prompt,
                 options = ToolCallingOptions(
                     maxToolCalls = 3,
                     autoExecute = true,
-                    temperature = 0.2f,
-                    maxTokens = 600  // Moderate tokens for concise educational responses
+                    temperature = textOptions.temperature.coerceAtMost(0.45f),
+                    maxTokens = textOptions.maxTokens,
+                    systemPrompt = toolPromptSpec.systemPrompt
                 )
             )
-            result.text
+            TextGenerationResult(
+                rawText = result.text,
+                responseTokens = (result.text.length / 4).coerceAtLeast(0)
+            )
         } else {
-            streamTextResponse(prompt, userQuery, onPartialResponse)
+            streamTextResponse(prompt, userQuery, onPartialResponse, textOptions)
         }
+        val rawResponse = generationResult.rawText
         
         val responseTime = System.currentTimeMillis() - startTime
         
         // Estimate token usage (rough approximation: 1 token ≈ 4 characters)
-        val promptTokens = prompt.length / 4
-        val responseTokens = rawResponse.length / 4
+        val promptTokens = when {
+            useVision -> visionPrompt.length / 4
+            useTools -> (toolPromptSpec.systemPrompt.length + toolPromptSpec.prompt.length) / 4
+            else -> prompt.length / 4
+        }
+        val responseTokens = generationResult.responseTokens.takeIf { it > 0 } ?: (rawResponse.length / 4)
         val totalTokens = promptTokens + responseTokens
         
         // Get model name (try to detect from loaded models)
@@ -113,7 +131,10 @@ class AIInferenceService {
         responseParser.parse(rawResponse, mode, language, userQuery).copy(
             modelName = modelName,
             tokensUsed = totalTokens,
-            responseTimeMs = responseTime
+            promptTokens = promptTokens,
+            responseTokens = responseTokens,
+            responseTimeMs = responseTime,
+            timeToFirstTokenMs = generationResult.timeToFirstTokenMs
         )
     }
 
@@ -125,39 +146,87 @@ class AIInferenceService {
         }
     }
 
-    private fun buildVisionPrompt(userQuery: String, mode: ResponseMode, language: Language): String {
+    private fun buildVisionPrompt(
+        userQuery: String,
+        mode: ResponseMode,
+        language: Language,
+        customPrompt: String?,
+        conversationHistory: List<Pair<String, String>>
+    ): String {
         val langName = languageName(language)
         val effectiveQuery = userQuery.ifBlank { defaultVisionQuestion(language) }
+        val assistantContext = customPrompt
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { "\nAssistant-specific persona instructions:\n$it" }
+            .orEmpty()
+        val conversationContext = visionConversationContext(conversationHistory)
         return """
-            You are Algsoch, an image-grounded AI study companion.
+            You are Algsoch, an image-grounded AI companion.
             Answer only from the uploaded image and the user query.
             If something is unclear or not visible, say that clearly instead of guessing.
             If the user uploads only an image, explain the main subject or key content of the image.
             If the image is a screenshot, document, diagram, or notes page, describe the important visible parts instead of replying with only one small label.
+            If the image is a personal, casual, or social photo, respond naturally to what is visible before adding any emotional reaction.
             Start with the main subject, then include visible text, UI, or structure, then explain the likely meaning or purpose.
             Never answer with only one or two words.
             Never include special tokens such as <end_of_utterance> in your reply.
+            Use recent chat context when it helps the response feel continuous, but do not invent details that are not visible.
+            $assistantContext
             ${visionModeInstructions(mode, retry = false)}
             Respond in $langName.
 
+            $conversationContext
             User query: $effectiveQuery
         """.trimIndent()
     }
 
-    private fun buildVisionRetryPrompt(userQuery: String, mode: ResponseMode, language: Language): String {
+    private fun buildVisionRetryPrompt(
+        userQuery: String,
+        mode: ResponseMode,
+        language: Language,
+        customPrompt: String?,
+        conversationHistory: List<Pair<String, String>>
+    ): String {
         val langName = languageName(language)
         val effectiveQuery = userQuery.ifBlank { defaultVisionQuestion(language) }
+        val assistantContext = customPrompt
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { "\nAssistant-specific persona instructions:\n$it" }
+            .orEmpty()
+        val conversationContext = visionConversationContext(conversationHistory)
         return """
             You are analyzing an uploaded image.
             The previous answer was too short or too vague. Rewrite it with a fuller, clearer response.
             Stay grounded in what is visible in the image.
             If the image is blurry or unclear, say that clearly, but still describe what is visible.
+            If the image is a personal, casual, or social photo, keep the tone natural and human while staying honest about what is visible.
             Never output special tokens or raw control text.
+            Use recent chat context when it helps the response feel continuous, but do not invent details that are not visible.
+            $assistantContext
             ${visionModeInstructions(mode, retry = true)}
             Respond in $langName.
 
+            $conversationContext
             User query: $effectiveQuery
         """.trimIndent()
+    }
+
+    private fun visionConversationContext(conversationHistory: List<Pair<String, String>>): String {
+        val recentTurns = conversationHistory
+            .filter { it.first == "user" || it.first == "assistant" }
+            .takeLast(4)
+
+        if (recentTurns.isEmpty()) return ""
+
+        return buildString {
+            appendLine("Recent chat context:")
+            recentTurns.forEach { (role, text) ->
+                val speaker = if (role == "assistant") "Assistant" else "User"
+                appendLine("$speaker: ${text.trim()}")
+            }
+        }.trim()
     }
 
     private fun visionModeInstructions(mode: ResponseMode, retry: Boolean): String = when (mode) {
@@ -290,15 +359,16 @@ class AIInferenceService {
     private suspend fun streamTextResponse(
         prompt: String,
         userQuery: String,
-        onPartialResponse: suspend (String) -> Unit
-    ): String {
-        val options = LLMGenerationOptions(streamingEnabled = true)
+        onPartialResponse: suspend (String) -> Unit,
+        options: LLMGenerationOptions
+    ): TextGenerationResult {
+        val streamingResult = RunAnywhere.generateStreamWithMetrics(prompt, options)
         val rawText = StringBuilder()
         var lastEmittedText = ""
         var lastEmissionAt = 0L
         var lastEmittedLength = 0
 
-        RunAnywhere.generateStream(prompt, options).collect { token ->
+        streamingResult.stream.collect { token ->
             rawText.append(token)
             val now = System.currentTimeMillis()
             val charsSinceLastEmit = rawText.length - lastEmittedLength
@@ -328,7 +398,13 @@ class AIInferenceService {
         if (finalCleaned != lastEmittedText) {
             onPartialResponse(finalCleaned)
         }
-        return rawText.toString()
+        val metrics = streamingResult.result.await()
+
+        return TextGenerationResult(
+            rawText = rawText.toString(),
+            responseTokens = metrics.responseTokens,
+            timeToFirstTokenMs = metrics.timeToFirstTokenMs?.roundToLong()
+        )
     }
 
     private suspend fun streamVisionResponse(
@@ -574,6 +650,49 @@ class AIInferenceService {
             "from" to ToolValue.string(from),
             "to" to ToolValue.string(to)
         )
+    }
+
+    private fun buildTextGenerationOptions(
+        mode: ResponseMode,
+        customPrompt: String?
+    ): LLMGenerationOptions {
+        val isCompanion = isCompanionPrompt(customPrompt)
+        val maxTokens = when (mode) {
+            ResponseMode.DIRECT -> if (isCompanion) 850 else 700
+            ResponseMode.ANSWER -> 800
+            ResponseMode.EXPLAIN, ResponseMode.NOTES, ResponseMode.DIRECTION -> 1000
+            ResponseMode.CREATIVE -> 1100
+            ResponseMode.THEORY -> 1200
+        }
+        val temperature = when (mode) {
+            ResponseMode.DIRECT -> if (isCompanion) 0.72f else 0.35f
+            ResponseMode.ANSWER, ResponseMode.NOTES, ResponseMode.DIRECTION -> 0.35f
+            ResponseMode.EXPLAIN, ResponseMode.THEORY -> 0.4f
+            ResponseMode.CREATIVE -> 0.75f
+        }
+        val topP = when (mode) {
+            ResponseMode.DIRECT -> if (isCompanion) 0.96f else 0.92f
+            ResponseMode.CREATIVE -> 0.95f
+            else -> 0.92f
+        }
+
+        return LLMGenerationOptions(
+            maxTokens = maxTokens,
+            temperature = temperature,
+            topP = topP,
+            streamingEnabled = true
+        )
+    }
+
+    private fun isCompanionPrompt(customPrompt: String?): Boolean {
+        val normalized = customPrompt?.lowercase(Locale.getDefault()).orEmpty()
+        if (normalized.isBlank()) return false
+
+        return "companion" in normalized && (
+            "girlfriend" in normalized ||
+                "boyfriend" in normalized ||
+                "partner" in normalized
+            )
     }
     
     suspend fun generateReasoningSteps(userQuery: String, response: String): List<ReasoningStep> = 
