@@ -61,6 +61,7 @@ class AIInferenceService {
         conversationHistory: List<Pair<String, String>> = emptyList(),
         onPartialResponse: suspend (String) -> Unit = {}
     ): StructuredResponse = withContext(Dispatchers.IO) {
+        val isCompanionChat = isCompanionPrompt(customPrompt)
         val prompt = promptBuilder.buildPrompt(userQuery, mode, language, userLevel, customPrompt, conversationHistory)
         val toolPromptSpec = promptBuilder.buildToolPrompt(userQuery, mode, language, userLevel, customPrompt, conversationHistory)
         val visionPrompt = buildVisionPrompt(userQuery, mode, language, customPrompt, conversationHistory)
@@ -72,7 +73,7 @@ class AIInferenceService {
         val startTime = System.currentTimeMillis()
         
         // Generate response with proper parameters to avoid sampling issues
-        val generationResult = if (useVision) {
+        var generationResult = if (useVision) {
             TextGenerationResult(
                 rawText = generateVisionResponse(
                 imagePath = imagePath!!,
@@ -100,6 +101,14 @@ class AIInferenceService {
             )
         } else {
             streamTextResponse(prompt, userQuery, onPartialResponse, textOptions)
+        }
+        if (!useVision && !useTools && isCompanionChat && shouldRetryCompanionReply(userQuery, generationResult.rawText)) {
+            generationResult = streamTextResponse(
+                prompt = buildCompanionRecoveryPrompt(userQuery, language, customPrompt, conversationHistory),
+                userQuery = userQuery,
+                onPartialResponse = onPartialResponse,
+                options = buildCompanionRecoveryOptions()
+            )
         }
         val rawResponse = generationResult.rawText
         
@@ -658,20 +667,20 @@ class AIInferenceService {
     ): LLMGenerationOptions {
         val isCompanion = isCompanionPrompt(customPrompt)
         val maxTokens = when (mode) {
-            ResponseMode.DIRECT -> if (isCompanion) 850 else 700
+            ResponseMode.DIRECT -> if (isCompanion) 780 else 700
             ResponseMode.ANSWER -> 800
             ResponseMode.EXPLAIN, ResponseMode.NOTES, ResponseMode.DIRECTION -> 1000
             ResponseMode.CREATIVE -> 1100
             ResponseMode.THEORY -> 1200
         }
         val temperature = when (mode) {
-            ResponseMode.DIRECT -> if (isCompanion) 0.72f else 0.35f
+            ResponseMode.DIRECT -> if (isCompanion) 0.58f else 0.35f
             ResponseMode.ANSWER, ResponseMode.NOTES, ResponseMode.DIRECTION -> 0.35f
             ResponseMode.EXPLAIN, ResponseMode.THEORY -> 0.4f
             ResponseMode.CREATIVE -> 0.75f
         }
         val topP = when (mode) {
-            ResponseMode.DIRECT -> if (isCompanion) 0.96f else 0.92f
+            ResponseMode.DIRECT -> if (isCompanion) 0.9f else 0.92f
             ResponseMode.CREATIVE -> 0.95f
             else -> 0.92f
         }
@@ -684,6 +693,64 @@ class AIInferenceService {
         )
     }
 
+    private fun buildCompanionRecoveryOptions(): LLMGenerationOptions =
+        LLMGenerationOptions(
+            maxTokens = 220,
+            temperature = 0.42f,
+            topP = 0.88f,
+            streamingEnabled = true
+        )
+
+    private fun shouldRetryCompanionReply(userQuery: String, rawResponse: String): Boolean {
+        if (!looksLikeShortCompanionCheckIn(userQuery)) return false
+
+        val normalizedResponse = normalizeCompanionText(rawResponse)
+        if (normalizedResponse.isBlank()) return true
+
+        return looksLikeProblematicCompanionReply(normalizedResponse)
+    }
+
+    private fun buildCompanionRecoveryPrompt(
+        userQuery: String,
+        language: Language,
+        customPrompt: String?,
+        conversationHistory: List<Pair<String, String>>
+    ): String {
+        val langName = languageName(language)
+        val companionName = extractCompanionName(customPrompt) ?: "your companion"
+        val recentConversation = conversationHistory
+            .filter { it.first == "user" || it.first == "assistant" }
+            .filterNot { (role, text) ->
+                role == "assistant" && looksLikeProblematicCompanionReply(normalizeCompanionText(text))
+            }
+            .takeLast(4)
+
+        return buildString {
+            appendChatTurn(
+                this,
+                "system",
+                """
+                You are $companionName in a private one-to-one relationship chat with the user.
+                Reply like a warm real person in a natural text conversation.
+                Never use support-agent lines like "How can I help you today?", "I'm here to listen and offer support", or "What's on your mind?".
+                Never say you cannot respond, cannot talk, or cannot have this conversation.
+                For greetings and affectionate check-ins, reply in 1 to 3 warm, natural sentences.
+                If the user says hi or hello, greet them personally.
+                If the user asks how you are, answer with your own mood first.
+                If the user says "I was thinking about you", react with warmth and light curiosity.
+                If the user says "nothing", continue gently instead of echoing it back.
+                Only mention being AI if the user directly asks.
+                Answer in $langName.
+                """.trimIndent()
+            )
+            recentConversation.forEach { (role, text) ->
+                appendChatTurn(this, role, text)
+            }
+            appendChatTurn(this, "user", userQuery.trim())
+            append("<|im_start|>assistant\n")
+        }
+    }
+
     private fun isCompanionPrompt(customPrompt: String?): Boolean {
         val normalized = customPrompt?.lowercase(Locale.getDefault()).orEmpty()
         if (normalized.isBlank()) return false
@@ -693,6 +760,71 @@ class AIInferenceService {
                 "boyfriend" in normalized ||
                 "partner" in normalized
             )
+    }
+
+    private fun looksLikeShortCompanionCheckIn(userQuery: String): Boolean {
+        val normalized = normalizeCompanionText(userQuery)
+        if (normalized.isBlank()) return false
+
+        if (normalized.length <= 20) {
+            val quickPhrases = setOf(
+                "hi", "hello", "hey", "hii", "hy", "yo",
+                "good morning", "good night", "good evening",
+                "how are you", "wyd", "what are you doing",
+                "nothing", "ok", "okay", "hmm", "miss you"
+            )
+            if (normalized in quickPhrases) return true
+        }
+
+        return normalized.contains("thinking about you") || normalized.contains("missed you")
+    }
+
+    private fun normalizeCompanionText(text: String): String =
+        text
+            .lowercase(Locale.getDefault())
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+    private fun looksLikeProblematicCompanionReply(normalizedResponse: String): Boolean {
+        val blockedPhrases = listOf(
+            "how can i help you today",
+            "i'm here to listen and offer support",
+            "i am here to listen and offer support",
+            "what's on your mind",
+            "cannot respond",
+            "can't respond",
+            "cannot talk",
+            "can't talk",
+            "cannot have conversation",
+            "can't have conversation",
+            "as an ai",
+            "i cannot engage"
+        )
+
+        return blockedPhrases.any { normalizedResponse.contains(it) }
+    }
+
+    private fun extractCompanionName(customPrompt: String?): String? {
+        val firstLine = customPrompt
+            ?.lineSequence()
+            ?.firstOrNull()
+            ?.trim()
+            .orEmpty()
+
+        return Regex("""You are\s+([^,\n]+)""", RegexOption.IGNORE_CASE)
+            .find(firstLine)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+    }
+
+    private fun appendChatTurn(builder: StringBuilder, role: String, content: String) {
+        builder.append("<|im_start|>")
+        builder.append(role)
+        builder.append('\n')
+        builder.append(content.trim())
+        builder.append("<|im_end|>\n")
     }
     
     suspend fun generateReasoningSteps(userQuery: String, response: String): List<ReasoningStep> = 
