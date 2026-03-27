@@ -153,6 +153,7 @@ $userQuery<|im_end|>
             - Keep responses concise but complete
             - ALWAYS end with one sentence that ties it to student learning
             - Use recent chat turns and remembered past-chat details only when they are relevant to the new question
+            - When learner-profile or past-chat notes are provided, use them to personalize the explanation and connect with what the student has studied before
             - If remembered details seem unrelated or uncertain, ignore them instead of forcing them in
         """.trimIndent()
 

@@ -21,6 +21,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Chat
+import androidx.compose.material.icons.automirrored.rounded.Notes
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -732,62 +734,61 @@ private fun PremiumModeSelectorSheet(
         onDismissRequest = onDismiss,
         containerColor = BackgroundDark
     ) {
-        Column(modifier = Modifier.padding(24.dp).navigationBarsPadding()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.9f)
+                .padding(horizontal = 20.dp)
+                .navigationBarsPadding()
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             Text("Switch Mode", style = MaterialTheme.typography.headlineSmall, color = Color.White, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(20.dp))
+            Text(
+                "Choose the response style you want. Bigger cards make switching feel smoother and more touch-friendly on smaller screens.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextSecondary,
+                lineHeight = 20.sp
+            )
 
-            // First row of modes
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(ResponseMode.DIRECT, ResponseMode.ANSWER, ResponseMode.EXPLAIN).forEach { mode ->
-                    val isSelected = viewModel.selectedMode == mode && viewModel.selectedCustomMode == null
-                    Surface(
-                        onClick = { viewModel.changeMode(mode); onDismiss() },
-                        modifier = Modifier.weight(1f),
-                        color = if (isSelected) AccentBlue else SurfaceSecondary,
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text(mode.displayName(), modifier = Modifier.padding(12.dp), textAlign = TextAlign.Center, color = if (isSelected) Color.White else TextSecondary, fontWeight = FontWeight.Bold)
+            listOf(
+                ResponseMode.DIRECT,
+                ResponseMode.ANSWER,
+                ResponseMode.EXPLAIN,
+                ResponseMode.NOTES,
+                ResponseMode.DIRECTION,
+                ResponseMode.CREATIVE,
+                ResponseMode.THEORY
+            ).forEach { mode ->
+                ModeOptionCard(
+                    mode = mode,
+                    isSelected = viewModel.selectedMode == mode && viewModel.selectedCustomMode == null,
+                    onClick = {
+                        viewModel.changeMode(mode)
+                        onDismiss()
                     }
-                }
+                )
             }
 
-            Spacer(Modifier.height(12.dp))
-
-            // Second row of modes
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(ResponseMode.NOTES, ResponseMode.DIRECTION, ResponseMode.CREATIVE, ResponseMode.THEORY).forEach { mode ->
-                    val isSelected = viewModel.selectedMode == mode && viewModel.selectedCustomMode == null
-                    Surface(
-                        onClick = { viewModel.changeMode(mode); onDismiss() },
-                        modifier = Modifier.weight(1f),
-                        color = if (isSelected) AccentBlue else SurfaceSecondary,
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text(mode.displayName(), modifier = Modifier.padding(12.dp), textAlign = TextAlign.Center, color = if (isSelected) Color.White else TextSecondary, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(8.dp))
             Text("Your AI Assistants", style = MaterialTheme.typography.labelLarge, color = AccentViolet)
-            Spacer(Modifier.height(12.dp))
 
             CustomModeStore.getModes().forEach { mode ->
                 AssistantItemInSheet(mode) { viewModel.changeCustomMode(mode); onDismiss() }
-                Spacer(Modifier.height(8.dp))
             }
 
-            Spacer(Modifier.height(12.dp))
             OutlinedButton(
                 onClick = onCreateCustomMode,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(14.dp),
                 border = androidx.compose.foundation.BorderStroke(1.dp, AccentViolet)
             ) {
                 Icon(Icons.Rounded.Add, null, tint = AccentViolet)
                 Spacer(Modifier.width(8.dp))
                 Text("Create New Assistant", color = AccentViolet)
             }
+
+            Spacer(Modifier.height(12.dp))
         }
     }
 }
@@ -797,12 +798,23 @@ private fun AssistantItemInSheet(mode: CustomMode, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
         color = SurfaceSecondary,
-        shape = RoundedCornerShape(12.dp)
+        shape = RoundedCornerShape(16.dp)
     ) {
         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Rounded.Psychology, null, tint = AccentViolet)
             Spacer(Modifier.width(16.dp))
-            Text(mode.name, color = Color.White, fontWeight = FontWeight.Bold)
+            Column {
+                Text(mode.name, color = Color.White, fontWeight = FontWeight.Bold)
+                if (mode.description.isNotBlank()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        mode.description,
+                        color = TextSecondary,
+                        style = MaterialTheme.typography.bodySmall,
+                        lineHeight = 18.sp
+                    )
+                }
+            }
         }
     }
 }
@@ -900,315 +912,385 @@ private fun PremiumAnalyticsDialog(
                     }
                 }
             } else {
-                Column(
+                BoxWithConstraints(
                     modifier = Modifier
                         .weight(1f)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                        .fillMaxWidth()
                 ) {
-                    Box(
+                    val isCompactLayout = maxWidth < 430.dp
+
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(24.dp))
-                            .background(
-                                brush = Brush.linearGradient(
-                                    colors = listOf(
-                                        AccentBlue.copy(alpha = 0.24f),
-                                        AccentCyan.copy(alpha = 0.18f),
-                                        SurfaceSecondary
-                                    )
-                                )
-                            )
-                            .border(
-                                width = 1.dp,
-                                color = Color.White.copy(alpha = 0.08f),
-                                shape = RoundedCornerShape(24.dp)
-                            )
-                            .padding(20.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                            Text(
-                                "Your study pulse",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = AccentCyan,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                "A clearer view of how much you have been learning and where your effort is going.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color.White,
-                                lineHeight = 20.sp
-                            )
-                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                AnalyticsHighlightCard(
-                                    label = "Questions Asked",
-                                    value = totalQuestions.toString(),
-                                    supportingText = if (totalQuestions == 1) "1 prompt across your chats" else "$totalQuestions prompts across your chats",
-                                    icon = Icons.Rounded.Forum,
-                                    color = AccentBlue,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                AnalyticsHighlightCard(
-                                    label = "Topics Covered",
-                                    value = topicsCovered.toString(),
-                                    supportingText = if (topicsCovered == 1) "1 learning cluster found" else "$topicsCovered learning clusters found",
-                                    icon = Icons.Rounded.Psychology,
-                                    color = AccentGreen,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                            AnalyticsHighlightCard(
-                                label = "Time Spent Learning",
-                                value = formatStudyTime(timeSpentMinutes),
-                                supportingText = if (timeSpentMinutes > 0) "Most active topic: $topTopic" else "Start chatting to build your timeline",
-                                icon = Icons.Rounded.Schedule,
-                                color = AccentOrange,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    }
-
-                    AnalyticsSectionHeader(
-                        title = "Overview",
-                        subtitle = "The quick numbers behind your learning activity"
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        StatBox(
-                            label = "Sessions",
-                            value = totalSessions.toString(),
-                            color = AccentCyan,
-                            icon = Icons.Rounded.History,
-                            modifier = Modifier.weight(1f)
-                        )
-                        StatBox(
-                            label = "Messages",
-                            value = totalMessages.toString(),
-                            color = AccentBlue,
-                            icon = Icons.Rounded.ChatBubbleOutline,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        StatBox(
-                            label = "Tokens Used",
-                            value = totalTokens.toString(),
-                            color = AccentViolet,
-                            icon = Icons.Rounded.Bolt,
-                            modifier = Modifier.weight(1f)
-                        )
-                        StatBox(
-                            label = "Avg. Reply",
-                            value = formatResponseTime(avgResponseTimeMs),
-                            color = AccentGreen,
-                            icon = Icons.Rounded.Speed,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-
-                    AnalyticsSectionHeader(
-                        title = "Study Habits",
-                        subtitle = "How regularly and when you tend to learn"
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        StatBox(
-                            label = "Current Streak",
-                            value = if (currentStudyStreak > 0) "$currentStudyStreak days" else "0 days",
-                            color = AccentOrange,
-                            icon = Icons.Rounded.Bolt,
-                            modifier = Modifier.weight(1f),
-                            supportingText = "Consecutive active study days"
-                        )
-                        StatBox(
-                            label = "Longest Streak",
-                            value = if (longestStudyStreak > 0) "$longestStudyStreak days" else "0 days",
-                            color = AccentPink,
-                            icon = Icons.Rounded.History,
-                            modifier = Modifier.weight(1f),
-                            supportingText = "Best run so far"
-                        )
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        StatBox(
-                            label = "Active Days",
-                            value = activeDays.toString(),
-                            color = AccentGreen,
-                            icon = Icons.Rounded.CalendarMonth,
-                            modifier = Modifier.weight(1f),
-                            supportingText = "Days with study activity"
-                        )
-                        StatBox(
-                            label = "This Week",
-                            value = questionsThisWeek.toString(),
-                            color = AccentBlue,
-                            icon = Icons.Rounded.DateRange,
-                            modifier = Modifier.weight(1f),
-                            supportingText = "Questions asked in the last 7 days"
-                        )
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        StatBox(
-                            label = "Peak Study Time",
-                            value = peakStudyWindow,
-                            color = AccentCyan,
-                            icon = Icons.Rounded.Schedule,
-                            modifier = Modifier.weight(1f),
-                            supportingText = "Your busiest study hour"
-                        )
-                        StatBox(
-                            label = "Questions / Active Day",
-                            value = String.format("%.1f", avgQuestionsPerActiveDay),
-                            color = AccentViolet,
-                            icon = Icons.Rounded.Analytics,
-                            modifier = Modifier.weight(1f),
-                            supportingText = "Average daily intensity"
-                        )
-                    }
-
-                    AnalyticsSectionHeader(
-                        title = "Study Profile",
-                        subtitle = "Patterns the app can infer from your questions"
-                    )
-                    Surface(
-                        color = SurfaceSecondary,
-                        shape = RoundedCornerShape(20.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.06f))
-                    ) {
-                        Column(
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(18.dp),
-                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                                .clip(RoundedCornerShape(24.dp))
+                                .background(
+                                    brush = Brush.linearGradient(
+                                        colors = listOf(
+                                            AccentBlue.copy(alpha = 0.24f),
+                                            AccentCyan.copy(alpha = 0.18f),
+                                            SurfaceSecondary
+                                        )
+                                    )
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    color = Color.White.copy(alpha = 0.08f),
+                                    shape = RoundedCornerShape(24.dp)
+                                )
+                                .padding(20.dp)
                         ) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                StatBox(
-                                    label = "Learning Style",
-                                    value = queryStyle,
-                                    color = AccentOrange,
-                                    icon = Icons.Rounded.AutoAwesome,
-                                    modifier = Modifier.weight(1f),
-                                    supportingText = "${avgQueryLength.toInt()} avg chars / question"
-                                )
-                                StatBox(
-                                    label = "Questions / Session",
-                                    value = String.format("%.1f", questionsPerSession),
-                                    color = AccentPink,
-                                    icon = Icons.Rounded.Analytics,
-                                    modifier = Modifier.weight(1f),
-                                    supportingText = "Average pace"
-                                )
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                StatBox(
-                                    label = "Messages / Session",
-                                    value = String.format("%.1f", avgMessagesPerSession),
+                            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                                Text(
+                                    "Your study pulse",
+                                    style = MaterialTheme.typography.labelLarge,
                                     color = AccentCyan,
-                                    icon = Icons.Rounded.ChatBubbleOutline,
-                                    modifier = Modifier.weight(1f),
-                                    supportingText = "Conversation depth"
+                                    fontWeight = FontWeight.Bold
                                 )
-                                StatBox(
-                                    label = "Top Topic",
-                                    value = topTopic,
-                                    color = AccentGreen,
-                                    icon = Icons.Rounded.LocalOffer,
-                                    modifier = Modifier.weight(1f),
-                                    supportingText = "Most repeated study theme"
+                                Text(
+                                    "A clearer view of how much you have been learning and where your effort is going.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Color.White,
+                                    lineHeight = 20.sp
                                 )
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                AnalyticsTag(
-                                    label = "Mode: $preferredMode",
-                                    color = AccentBlue,
-                                    icon = Icons.Rounded.Tune,
-                                    modifier = Modifier.weight(1f)
+                                ResponsiveAnalyticsPair(
+                                    compact = isCompactLayout,
+                                    first = { modifier ->
+                                        AnalyticsHighlightCard(
+                                            label = "Questions Asked",
+                                            value = totalQuestions.toString(),
+                                            supportingText = if (totalQuestions == 1) "1 prompt across your chats" else "$totalQuestions prompts across your chats",
+                                            icon = Icons.Rounded.Forum,
+                                            color = AccentBlue,
+                                            modifier = modifier
+                                        )
+                                    },
+                                    second = { modifier ->
+                                        AnalyticsHighlightCard(
+                                            label = "Topics Covered",
+                                            value = topicsCovered.toString(),
+                                            supportingText = if (topicsCovered == 1) "1 learning cluster found" else "$topicsCovered learning clusters found",
+                                            icon = Icons.Rounded.Psychology,
+                                            color = AccentGreen,
+                                            modifier = modifier
+                                        )
+                                    }
                                 )
-                                AnalyticsTag(
-                                    label = "Language: $preferredLanguage",
-                                    color = AccentGreen,
-                                    icon = Icons.Rounded.Language,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                AnalyticsTag(
-                                    label = "Level: $preferredLevel",
-                                    color = AccentViolet,
-                                    icon = Icons.Rounded.School,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                AnalyticsTag(
-                                    label = if (topicsCovered > 0) "Topic map ready" else "Topic map growing",
+                                AnalyticsHighlightCard(
+                                    label = "Time Spent Learning",
+                                    value = formatStudyTime(timeSpentMinutes),
+                                    supportingText = if (timeSpentMinutes > 0) "Most active topic: $topTopic" else "Start chatting to build your timeline",
+                                    icon = Icons.Rounded.Schedule,
                                     color = AccentOrange,
-                                    icon = Icons.Rounded.Analytics,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
-                    }
-
-                    AnalyticsSectionHeader(
-                        title = "Topics Covered",
-                        subtitle = "Subjects detected from the kinds of questions you ask"
-                    )
-                    if (topicsList.isEmpty()) {
-                        Surface(
-                            color = SurfaceSecondary,
-                            shape = RoundedCornerShape(18.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.06f))
-                        ) {
-                            Text(
-                                "Ask a few more study questions and your topic map will start appearing here.",
-                                modifier = Modifier.padding(18.dp),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = TextSecondary,
-                                lineHeight = 20.sp
-                            )
-                        }
-                    } else {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            topicInsights.take(6).forEachIndexed { index, topic ->
-                                TopicInsightCard(
-                                    rank = index + 1,
-                                    topic = topic,
                                     modifier = Modifier.fillMaxWidth()
                                 )
                             }
+                        }
 
-                            if (topicInsights.isEmpty()) {
-                                topicsList.chunked(2).forEach { topicRow ->
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        topicRow.forEach { topic ->
-                                            AnalyticsTag(
-                                                label = topic,
-                                                color = AccentCyan,
-                                                icon = Icons.Rounded.LocalOffer,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                        }
-                                        if (topicRow.size == 1) {
-                                            Spacer(Modifier.weight(1f))
-                                        }
-                                    }
-                                }
-                            } else {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    topicInsights.drop(6).take(2).forEach { topic ->
-                                        AnalyticsTag(
-                                            label = topic.name,
-                                            color = AccentCyan,
-                                            icon = Icons.Rounded.LocalOffer,
-                                            modifier = Modifier.weight(1f)
+                        AnalyticsSectionHeader(
+                            title = "Overview",
+                            subtitle = "The quick numbers behind your learning activity"
+                        )
+                        ResponsiveAnalyticsPair(
+                            compact = isCompactLayout,
+                            first = { modifier ->
+                                StatBox(
+                                    label = "Sessions",
+                                    value = totalSessions.toString(),
+                                    color = AccentCyan,
+                                    icon = Icons.Rounded.History,
+                                    modifier = modifier
+                                )
+                            },
+                            second = { modifier ->
+                                StatBox(
+                                    label = "Messages",
+                                    value = totalMessages.toString(),
+                                    color = AccentBlue,
+                                    icon = Icons.Rounded.ChatBubbleOutline,
+                                    modifier = modifier
+                                )
+                            }
+                        )
+                        ResponsiveAnalyticsPair(
+                            compact = isCompactLayout,
+                            first = { modifier ->
+                                StatBox(
+                                    label = "Tokens Used",
+                                    value = totalTokens.toString(),
+                                    color = AccentViolet,
+                                    icon = Icons.Rounded.Bolt,
+                                    modifier = modifier
+                                )
+                            },
+                            second = { modifier ->
+                                StatBox(
+                                    label = "Avg. Reply",
+                                    value = formatResponseTime(avgResponseTimeMs),
+                                    color = AccentGreen,
+                                    icon = Icons.Rounded.Speed,
+                                    modifier = modifier
+                                )
+                            }
+                        )
+
+                        AnalyticsSectionHeader(
+                            title = "Study Habits",
+                            subtitle = "How regularly and when you tend to learn"
+                        )
+                        ResponsiveAnalyticsPair(
+                            compact = isCompactLayout,
+                            first = { modifier ->
+                                StatBox(
+                                    label = "Current Streak",
+                                    value = if (currentStudyStreak > 0) "$currentStudyStreak days" else "0 days",
+                                    color = AccentOrange,
+                                    icon = Icons.Rounded.Bolt,
+                                    modifier = modifier,
+                                    supportingText = "Consecutive active study days"
+                                )
+                            },
+                            second = { modifier ->
+                                StatBox(
+                                    label = "Longest Streak",
+                                    value = if (longestStudyStreak > 0) "$longestStudyStreak days" else "0 days",
+                                    color = AccentPink,
+                                    icon = Icons.Rounded.History,
+                                    modifier = modifier,
+                                    supportingText = "Best run so far"
+                                )
+                            }
+                        )
+                        ResponsiveAnalyticsPair(
+                            compact = isCompactLayout,
+                            first = { modifier ->
+                                StatBox(
+                                    label = "Active Days",
+                                    value = activeDays.toString(),
+                                    color = AccentGreen,
+                                    icon = Icons.Rounded.CalendarMonth,
+                                    modifier = modifier,
+                                    supportingText = "Days with study activity"
+                                )
+                            },
+                            second = { modifier ->
+                                StatBox(
+                                    label = "This Week",
+                                    value = questionsThisWeek.toString(),
+                                    color = AccentBlue,
+                                    icon = Icons.Rounded.DateRange,
+                                    modifier = modifier,
+                                    supportingText = "Questions asked in the last 7 days"
+                                )
+                            }
+                        )
+                        ResponsiveAnalyticsPair(
+                            compact = isCompactLayout,
+                            first = { modifier ->
+                                StatBox(
+                                    label = "Peak Study Time",
+                                    value = peakStudyWindow,
+                                    color = AccentCyan,
+                                    icon = Icons.Rounded.Schedule,
+                                    modifier = modifier,
+                                    supportingText = "Your busiest study hour"
+                                )
+                            },
+                            second = { modifier ->
+                                StatBox(
+                                    label = "Questions / Active Day",
+                                    value = String.format("%.1f", avgQuestionsPerActiveDay),
+                                    color = AccentViolet,
+                                    icon = Icons.Rounded.Analytics,
+                                    modifier = modifier,
+                                    supportingText = "Average daily intensity"
+                                )
+                            }
+                        )
+
+                        AnalyticsSectionHeader(
+                            title = "Study Profile",
+                            subtitle = "Patterns the app can infer from your questions"
+                        )
+                        Surface(
+                            color = SurfaceSecondary,
+                            shape = RoundedCornerShape(20.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.06f))
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(18.dp),
+                                verticalArrangement = Arrangement.spacedBy(14.dp)
+                            ) {
+                                ResponsiveAnalyticsPair(
+                                    compact = isCompactLayout,
+                                    first = { modifier ->
+                                        StatBox(
+                                            label = "Learning Style",
+                                            value = queryStyle,
+                                            color = AccentOrange,
+                                            icon = Icons.Rounded.AutoAwesome,
+                                            modifier = modifier,
+                                            supportingText = "${avgQueryLength.toInt()} avg chars / question"
+                                        )
+                                    },
+                                    second = { modifier ->
+                                        StatBox(
+                                            label = "Questions / Session",
+                                            value = String.format("%.1f", questionsPerSession),
+                                            color = AccentPink,
+                                            icon = Icons.Rounded.Analytics,
+                                            modifier = modifier,
+                                            supportingText = "Average pace"
                                         )
                                     }
-                                    if (topicInsights.drop(6).take(2).size == 1) {
-                                        Spacer(Modifier.weight(1f))
+                                )
+                                ResponsiveAnalyticsPair(
+                                    compact = isCompactLayout,
+                                    first = { modifier ->
+                                        StatBox(
+                                            label = "Messages / Session",
+                                            value = String.format("%.1f", avgMessagesPerSession),
+                                            color = AccentCyan,
+                                            icon = Icons.Rounded.ChatBubbleOutline,
+                                            modifier = modifier,
+                                            supportingText = "Conversation depth"
+                                        )
+                                    },
+                                    second = { modifier ->
+                                        StatBox(
+                                            label = "Top Topic",
+                                            value = topTopic,
+                                            color = AccentGreen,
+                                            icon = Icons.Rounded.LocalOffer,
+                                            modifier = modifier,
+                                            supportingText = "Most repeated study theme"
+                                        )
                                     }
+                                )
+                                ResponsiveAnalyticsPair(
+                                    compact = isCompactLayout,
+                                    first = { modifier ->
+                                        AnalyticsTag(
+                                            label = "Mode: $preferredMode",
+                                            color = AccentBlue,
+                                            icon = Icons.Rounded.Tune,
+                                            modifier = modifier
+                                        )
+                                    },
+                                    second = { modifier ->
+                                        AnalyticsTag(
+                                            label = "Language: $preferredLanguage",
+                                            color = AccentGreen,
+                                            icon = Icons.Rounded.Language,
+                                            modifier = modifier
+                                        )
+                                    }
+                                )
+                                ResponsiveAnalyticsPair(
+                                    compact = isCompactLayout,
+                                    first = { modifier ->
+                                        AnalyticsTag(
+                                            label = "Level: $preferredLevel",
+                                            color = AccentViolet,
+                                            icon = Icons.Rounded.School,
+                                            modifier = modifier
+                                        )
+                                    },
+                                    second = { modifier ->
+                                        AnalyticsTag(
+                                            label = if (topicsCovered > 0) "Topic map ready" else "Topic map growing",
+                                            color = AccentOrange,
+                                            icon = Icons.Rounded.Analytics,
+                                            modifier = modifier
+                                        )
+                                    }
+                                )
+                            }
+                        }
+
+                        AnalyticsSectionHeader(
+                            title = "Topics Covered",
+                            subtitle = "Subjects detected from the kinds of questions you ask"
+                        )
+                        if (topicsList.isEmpty()) {
+                            Surface(
+                                color = SurfaceSecondary,
+                                shape = RoundedCornerShape(18.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.06f))
+                            ) {
+                                Text(
+                                    "Ask a few more study questions and your topic map will start appearing here.",
+                                    modifier = Modifier.padding(18.dp),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = TextSecondary,
+                                    lineHeight = 20.sp
+                                )
+                            }
+                        } else {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                topicInsights.take(6).forEachIndexed { index, topic ->
+                                    TopicInsightCard(
+                                        rank = index + 1,
+                                        topic = topic,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+
+                                if (topicInsights.isEmpty()) {
+                                    topicsList.chunked(2).forEach { topicRow ->
+                                        ResponsiveAnalyticsPair(
+                                            compact = isCompactLayout,
+                                            first = { modifier ->
+                                                AnalyticsTag(
+                                                    label = topicRow.first(),
+                                                    color = AccentCyan,
+                                                    icon = Icons.Rounded.LocalOffer,
+                                                    modifier = modifier
+                                                )
+                                            },
+                                            second = { modifier ->
+                                                if (topicRow.size > 1) {
+                                                    AnalyticsTag(
+                                                        label = topicRow[1],
+                                                        color = AccentCyan,
+                                                        icon = Icons.Rounded.LocalOffer,
+                                                        modifier = modifier
+                                                    )
+                                                } else {
+                                                    Spacer(modifier)
+                                                }
+                                            }
+                                        )
+                                    }
+                                } else if (topicInsights.drop(6).isNotEmpty()) {
+                                    ResponsiveAnalyticsPair(
+                                        compact = isCompactLayout,
+                                        first = { modifier ->
+                                            AnalyticsTag(
+                                                label = topicInsights.drop(6).first().name,
+                                                color = AccentCyan,
+                                                icon = Icons.Rounded.LocalOffer,
+                                                modifier = modifier
+                                            )
+                                        },
+                                        second = { modifier ->
+                                            topicInsights.drop(7).firstOrNull()?.let { topic ->
+                                                AnalyticsTag(
+                                                    label = topic.name,
+                                                    color = AccentCyan,
+                                                    icon = Icons.Rounded.LocalOffer,
+                                                    modifier = modifier
+                                                )
+                                            } ?: Spacer(modifier)
+                                        }
+                                    )
                                 }
                             }
                         }
@@ -1230,6 +1312,110 @@ private fun PremiumAnalyticsDialog(
             }
 
             Spacer(Modifier.height(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun ModeOptionCard(
+    mode: ResponseMode,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        color = if (isSelected) AccentBlue.copy(alpha = 0.18f) else SurfaceSecondary,
+        shape = RoundedCornerShape(18.dp),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (isSelected) AccentBlue else Color.White.copy(alpha = 0.06f)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(42.dp),
+                shape = RoundedCornerShape(14.dp),
+                color = if (isSelected) AccentBlue.copy(alpha = 0.18f) else BackgroundDark
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = modeIcon(mode),
+                        contentDescription = null,
+                        tint = if (isSelected) AccentBlue else TextMuted,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    mode.displayName(),
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    modeDescription(mode),
+                    color = TextSecondary,
+                    style = MaterialTheme.typography.bodySmall,
+                    lineHeight = 18.sp
+                )
+            }
+            if (isSelected) {
+                Spacer(Modifier.width(12.dp))
+                Icon(Icons.Rounded.CheckCircle, null, tint = AccentBlue, modifier = Modifier.size(20.dp))
+            }
+        }
+    }
+}
+
+private fun modeIcon(mode: ResponseMode): ImageVector = when (mode) {
+    ResponseMode.DIRECT -> Icons.AutoMirrored.Rounded.Chat
+    ResponseMode.ANSWER -> Icons.Rounded.TaskAlt
+    ResponseMode.EXPLAIN -> Icons.Rounded.AutoStories
+    ResponseMode.NOTES -> Icons.AutoMirrored.Rounded.Notes
+    ResponseMode.DIRECTION -> Icons.Rounded.Route
+    ResponseMode.CREATIVE -> Icons.Rounded.Lightbulb
+    ResponseMode.THEORY -> Icons.Rounded.Psychology
+}
+
+private fun modeDescription(mode: ResponseMode): String = when (mode) {
+    ResponseMode.DIRECT -> "Quick and natural replies for fast back-and-forth conversation."
+    ResponseMode.ANSWER -> "Clear answers first, followed by a short explanation and examples."
+    ResponseMode.EXPLAIN -> "Teacher-style breakdown with step-by-step understanding."
+    ResponseMode.NOTES -> "Study-note format for revision, recall, and quick review."
+    ResponseMode.DIRECTION -> "Guided approach focused on how to solve or attempt the problem."
+    ResponseMode.CREATIVE -> "Memorable analogies, stories, and real-world connections."
+    ResponseMode.THEORY -> "Deeper conceptual explanation with background and big-picture links."
+}
+
+@Composable
+private fun ResponsiveAnalyticsPair(
+    compact: Boolean,
+    first: @Composable (Modifier) -> Unit,
+    second: @Composable (Modifier) -> Unit
+) {
+    if (compact) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            first(Modifier.fillMaxWidth())
+            second(Modifier.fillMaxWidth())
+        }
+    } else {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            first(Modifier.weight(1f))
+            second(Modifier.weight(1f))
         }
     }
 }

@@ -530,34 +530,63 @@ class AlgsochViewModel : ViewModel() {
     }
 
     private suspend fun buildConversationHistory(currentQuery: String): List<Pair<String, String>> {
+        val historicalMessages = (chatHistoryManager?.loadAllMessages() ?: emptyList())
+            .filter { it.text.isNotBlank() }
+        val currentFingerprints = messages.map(::messageFingerprint).toSet()
+        val previousMessages = historicalMessages.filterNot { messageFingerprint(it) in currentFingerprints }
+
         val recentConversation = messages
             .dropLast(1)
             .filter { it.text.isNotBlank() }
-            .takeLast(6)
+            .takeLast(8)
             .map { message ->
                 (if (message.isUser) "user" else "assistant") to message.text.trim().take(240)
             }
 
-        val rememberedContext = findRelevantPastMessages(currentQuery)
+        val learnerProfileMemory = buildLearnerProfileMemory(previousMessages)
+        val rememberedContext = findRelevantPastMessages(currentQuery, previousMessages)
 
         return buildList {
+            learnerProfileMemory?.let { add("memory" to it) }
             rememberedContext.forEach { add("memory" to it) }
             addAll(recentConversation)
         }
     }
 
-    private suspend fun findRelevantPastMessages(query: String): List<String> {
+    private fun buildLearnerProfileMemory(previousMessages: List<ChatMessage>): String? {
+        val pastUserMessages = previousMessages.filter { it.isUser && it.text.isNotBlank() }
+        if (pastUserMessages.size < 2) return null
+
+        val topTopics = extractTopics(pastUserMessages.map { it.text }).take(3).map { it.name }
+        val recentPastQuestions = pastUserMessages
+            .sortedByDescending { it.timestamp }
+            .map { it.text.trim() }
+            .distinctBy(::normalizeText)
+            .take(2)
+
+        return buildString {
+            append("Learner profile from past chats: ")
+            if (topTopics.isNotEmpty()) {
+                append("frequently studies ")
+                append(topTopics.joinToString(", "))
+                append(". ")
+            }
+            if (recentPastQuestions.isNotEmpty()) {
+                append("Earlier questions included: ")
+                append(recentPastQuestions.joinToString(" | ") { it.take(70) })
+                append(".")
+            }
+        }.trim().takeIf { it.isNotBlank() }
+    }
+
+    private fun findRelevantPastMessages(query: String, previousMessages: List<ChatMessage>): List<String> {
         if (query.isBlank()) return emptyList()
 
-        val manager = chatHistoryManager ?: return emptyList()
-        val currentFingerprints = messages.map(::messageFingerprint).toSet()
-
-        return manager.loadAllMessages()
+        return previousMessages
             .filter { it.isUser && it.text.isNotBlank() }
-            .filterNot { messageFingerprint(it) in currentFingerprints }
             .mapNotNull { message ->
                 val score = scoreHistoricalRelevance(query, message.text)
-                if (score > 1.75) {
+                if (score > 1.2) {
                     RelevantMemoryMatch(message.text.trim(), score, message.timestamp)
                 } else {
                     null
@@ -565,7 +594,7 @@ class AlgsochViewModel : ViewModel() {
             }
             .sortedWith(compareByDescending<RelevantMemoryMatch> { it.score }.thenByDescending { it.timestamp })
             .distinctBy { normalizeText(it.text) }
-            .take(3)
+            .take(4)
             .map { it.text.take(220) }
     }
 
