@@ -36,9 +36,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -800,18 +804,7 @@ private fun MessageBubble(
                         .padding(20.dp)
                 ) {
                     message.structuredResponse?.let { response ->
-                        // Combine all response parts
-                        val fullContent = buildString {
-                            append(response.directAnswer)
-                            if (response.quickExplanation.isNotBlank()) {
-                                append("\n\n")
-                                append(response.quickExplanation)
-                            }
-                            if (response.deepExplanation?.isNotBlank() == true) {
-                                append("\n\n")
-                                append(response.deepExplanation)
-                            }
-                        }.trim().ifBlank {
+                        val fullContent = response.toDisplayText().ifBlank {
                             if (isMissingSavedReply) {
                                 "Older reply could not be restored from saved history."
                             } else {
@@ -820,7 +813,7 @@ private fun MessageBubble(
                         }
                         SelectionContainer {
                             Text(
-                                text = fullContent,
+                                text = buildFormattedAssistantText(fullContent),
                                 color = if (isMissingSavedReply) TextMuted else Color.White,
                                 style = if (isMissingSavedReply) {
                                     MaterialTheme.typography.bodySmall.copy(lineHeight = 20.sp)
@@ -890,7 +883,7 @@ private fun MessageBubble(
 
                         if (message.isPending) {
                             Text(
-                                text = displayText,
+                                text = buildFormattedAssistantText(displayText),
                                 color = textColor,
                                 style = textStyle,
                                 modifier = Modifier
@@ -901,7 +894,7 @@ private fun MessageBubble(
                         } else {
                             SelectionContainer {
                                 Text(
-                                    text = displayText,
+                                    text = buildFormattedAssistantText(displayText),
                                     color = textColor,
                                     style = textStyle,
                                     modifier = Modifier
@@ -934,6 +927,61 @@ private fun MessageBubble(
                 }
             }
         }
+    }
+}
+
+private fun buildFormattedAssistantText(text: String): AnnotatedString = buildAnnotatedString {
+    val numberedTitlePattern = Regex("""^(\d+\.\s+[^:]{1,80}:)(\s*.*)$""")
+    val bulletTitlePattern = Regex("""^(-\s+[^:]{1,80}:)(\s*.*)$""")
+    val stepPattern = Regex("""^(Step\s+\d+:)(\s*.*)$""", RegexOption.IGNORE_CASE)
+    val sectionPattern = Regex("""^(Tips:|Common Mistakes:|Summary:)(\s*.*)$""", RegexOption.IGNORE_CASE)
+    val genericSectionPattern = Regex("""^([A-Z][A-Za-z ]{1,30}:)(\s*.*)$""")
+    val lines = text.lines()
+
+    lines.forEachIndexed { index, rawLine ->
+        val line = rawLine.trimEnd()
+        when {
+            line.isBlank() -> Unit
+            numberedTitlePattern.matches(line) -> {
+                val match = numberedTitlePattern.find(line)!!
+                appendBoldSegment(match.groupValues[1])
+                append(match.groupValues[2])
+            }
+
+            bulletTitlePattern.matches(line) -> {
+                val match = bulletTitlePattern.find(line)!!
+                appendBoldSegment(match.groupValues[1])
+                append(match.groupValues[2])
+            }
+
+            stepPattern.matches(line) -> {
+                val match = stepPattern.find(line)!!
+                appendBoldSegment(match.groupValues[1])
+                append(match.groupValues[2])
+            }
+
+            sectionPattern.matches(line) -> {
+                val match = sectionPattern.find(line)!!
+                appendBoldSegment(match.groupValues[1])
+                append(match.groupValues[2])
+            }
+
+            genericSectionPattern.matches(line) -> {
+                val match = genericSectionPattern.find(line)!!
+                appendBoldSegment(match.groupValues[1])
+                append(match.groupValues[2])
+            }
+
+            else -> append(line)
+        }
+
+        if (index < lines.lastIndex) append('\n')
+    }
+}
+
+private fun AnnotatedString.Builder.appendBoldSegment(text: String) {
+    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+        append(text)
     }
 }
 
@@ -1169,12 +1217,15 @@ private fun HistoryItem(session: ChatSession, isActive: Boolean, onClick: () -> 
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Text(
-                        session.preview,
-                        color = TextMuted,
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
+                    HistoryPreviewLine(
+                        label = "You",
+                        value = session.userPreview.ifBlank { session.title },
+                        color = TextMuted
+                    )
+                    HistoryPreviewLine(
+                        label = session.assistantName ?: "Reply",
+                        value = session.assistantPreview.ifBlank { session.preview },
+                        color = Color.White.copy(alpha = 0.86f)
                     )
                 }
                 IconButton(onClick = onDelete) {
@@ -1187,6 +1238,33 @@ private fun HistoryItem(session: ChatSession, isActive: Boolean, onClick: () -> 
                 HistoryMetaChip("${session.messageCount} messages")
             }
         }
+    }
+}
+
+@Composable
+private fun HistoryPreviewLine(label: String, value: String, color: Color) {
+    if (value.isBlank()) return
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            text = "$label:",
+            color = AccentBlue,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1
+        )
+        Text(
+            text = value,
+            color = color,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
     }
 }
 

@@ -609,14 +609,21 @@ class AlgsochViewModel : ViewModel() {
             .filter { it.text.isNotBlank() }
         val currentFingerprints = messages.map(::messageFingerprint).toSet()
         val previousMessages = historicalMessages.filterNot { messageFingerprint(it) in currentFingerprints }
+        val effectiveMode = activeMode?.let(::preferredResponseModeFor) ?: selectedMode
 
         val recentConversation = messages
             .dropLast(1)
             .filter { it.text.isNotBlank() }
-            .takeLast(8)
-            .map { message ->
-                (if (message.isUser) "user" else "assistant") to message.text.trim().take(240)
+            .takeLast(12)
+            .mapNotNull { message ->
+                when {
+                    message.isUser -> "user" to message.text.trim().take(240)
+                    shouldIncludeAssistantHistory(message, effectiveMode, activeMode) ->
+                        "assistant" to message.text.trim().take(240)
+                    else -> null
+                }
             }
+            .takeLast(8)
 
         val profileMemory = if (CustomModeStore.isCompanionMode(activeMode)) {
             buildCompanionProfileMemory(previousMessages)
@@ -630,6 +637,23 @@ class AlgsochViewModel : ViewModel() {
             rememberedContext.forEach { add("memory" to it) }
             addAll(recentConversation)
         }
+    }
+
+    private fun shouldIncludeAssistantHistory(
+        message: ChatMessage,
+        effectiveMode: ResponseMode,
+        activeMode: CustomMode?
+    ): Boolean {
+        if (message.isUser) return true
+
+        val currentAssistantLabel = activeMode?.name
+        val isSameAssistant = when {
+            currentAssistantLabel != null -> message.assistantLabel == currentAssistantLabel
+            else -> message.assistantLabel == null
+        }
+        val isSameMode = message.structuredResponse?.mode == effectiveMode
+
+        return isSameAssistant && (isSameMode || message.structuredResponse == null)
     }
 
     private fun buildLearnerProfileMemory(previousMessages: List<ChatMessage>): String? {
@@ -662,7 +686,9 @@ class AlgsochViewModel : ViewModel() {
         val pastUserMessages = previousMessages.filter { it.isUser && it.text.isNotBlank() }
         if (pastUserMessages.isEmpty()) return null
 
-        val relationshipStage = inferCompanionRelationshipStage(previousMessages.count { it.text.isNotBlank() })
+        val relationshipMessageCount = previousMessages.count { it.text.isNotBlank() }
+        val relationshipStage = inferCompanionRelationshipStage(relationshipMessageCount)
+        val stageGuidance = companionStageGuidance(relationshipMessageCount)
         val recentHighlights = pastUserMessages
             .sortedByDescending { it.timestamp }
             .map { it.text.trim() }
@@ -674,8 +700,11 @@ class AlgsochViewModel : ViewModel() {
 
         return buildString {
             append("Relationship memory from earlier chats: ")
-            append("current bond stage feels like ")
+            append("current bond stage is ")
             append(relationshipStage)
+            append(". ")
+            append("Stage guidance: ")
+            append(stageGuidance)
             append(". ")
             if (recentMoods.isNotEmpty()) {
                 append("the user's recent mood has included ")
@@ -701,6 +730,23 @@ class AlgsochViewModel : ViewModel() {
         messageCount >= 16 -> "growing affection, trust, and emotional closeness"
         messageCount >= 6 -> "early chemistry with warmth and curiosity"
         else -> "a new connection that is just starting to become personal"
+    }
+
+    private fun companionStageGuidance(messageCount: Int): String = when {
+        messageCount >= 80 ->
+            "You can sound secure, deeply attached, and partner-like, with strong continuity and future-facing warmth"
+
+        messageCount >= 36 ->
+            "Use clear affection, comfort, and emotional reassurance, but keep it natural rather than dramatic"
+
+        messageCount >= 16 ->
+            "Let closeness deepen with tenderness, soft flirtation, and growing trust without jumping into forever-love speeches every turn"
+
+        messageCount >= 6 ->
+            "Keep the energy warm, curious, and lightly flirty; build intimacy gradually instead of acting like a long-time life partner"
+
+        else ->
+            "Treat this like a new romantic connection: be sweet and interested, but do not act intensely possessive, deeply devoted, or already life-partner level"
     }
 
     private fun findRelevantPastMessages(query: String, previousMessages: List<ChatMessage>): List<String> {

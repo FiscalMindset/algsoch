@@ -117,86 +117,80 @@ class PromptBuilder {
     ): String {
         val modeInstructions = when(mode) {
             ResponseMode.DIRECT -> """
-                Pure conversation mode. Answer directly and naturally without any structure or guidance format.
-                - Respond like a friend having a chat
-                - Short, direct responses (2-3 sentences typically)
-                - NO step-by-step or numbered points
-                - NO problem-solving guidance
-                - Just answer the question naturally
+                DIRECT MODE. This mode must stay shorter and lighter than Answer mode.
+                MANDATORY RESPONSE SHAPE:
+                - Reply in 1 short paragraph using 1 to 3 sentences
+                - Target roughly 15 to 45 words unless the user clearly asks for more detail
+                - Give only the most useful direct answer
+                - NO lists, labels, titles, bullets, or steps
+                - NO extra examples, background, or side explanations unless the user asks for them
+                - Sound natural, like a quick text reply from a smart friend
             """.trimIndent()
             
             ResponseMode.ANSWER -> """
-                Give me a direct, clear answer to my question.
-                - Start with the main answer first (1-2 sentences)
-                - Explain why it's the answer
-                - Give 1-2 practical examples
-                - Keep paragraphs short and readable
-                - Sound confident and knowledgeable
+                ANSWER MODE. This mode should be a little fuller than Direct mode, but still compact.
+                MANDATORY RESPONSE SHAPE:
+                - Start with the main answer in 1 to 2 sentences
+                - Then give a short explanation of why it is the answer
+                - Add at most 1 practical example only if it improves clarity
+                - Keep the whole reply to about 3 to 6 sentences total
+                - Use short paragraphs, not long essays and not deep theory unless asked
             """.trimIndent()
             
             ResponseMode.EXPLAIN -> """
-                Explain this like a good teacher breaking it down step by step.
+                EXPLAIN MODE.
+                MANDATORY RESPONSE SHAPE:
                 - Start with a simple way to think about it
-                - Go through the main ideas one at a time
-                - Use real examples to show what you mean
-                - Keep sentences clear and not too long
-                - Make it easy to follow
+                - Go through the main ideas one at a time in a clear learning flow
+                - Use 1 or 2 real examples when helpful
+                - Keep the explanation to about 2 to 4 short paragraphs
+                - If you use a numbered list, make every item complete and finish the list cleanly
+                - Never use markdown emphasis like **bold**
+                - Make it easy to follow, like a patient teacher
             """.trimIndent()
 
             ResponseMode.NOTES -> """
-                STUDY NOTES FORMAT:
+                NOTES MODE. FOLLOW THIS FORMAT EXACTLY:
                 - Start with a short topic title on its own line
-                - Then write 4-8 bullet points beginning with "- "
+                - Then write 4 to 7 bullet points beginning with "- "
                 - Keep each bullet to one clear idea
+                - Do NOT write long paragraphs
                 - Do NOT use markdown symbols like ** or ##
                 - End with "Summary: [one sentence]" on its own line
-                - Do NOT write long paragraphs
-                - Structure it like clean revision notes
+                - Structure it like clean revision notes, not an essay
             """.trimIndent()
 
             ResponseMode.DIRECTION -> """
-                STEP-BY-STEP SOLUTION FORMAT:
-                - Write 3-5 steps using "Step 1:", "Step 2:", and so on
-                - Keep each step focused and practical
+                DIRECTION MODE. FOLLOW THIS FORMAT EXACTLY:
+                - Write 3 to 5 steps using "Step 1:", "Step 2:", and so on
+                - Keep each step focused on what to do next
                 - After the steps, include a short "Tips:" section with bullet points
                 - Then include a short "Common Mistakes:" section with bullet points
-                - Focus on HOW TO do it, not only the theory
+                - Focus on HOW TO do it, not just theory
             """.trimIndent()
 
             ResponseMode.CREATIVE -> """
-                Tell me the story or connection behind this. Make it memorable.
+                CREATIVE MODE.
+                MANDATORY RESPONSE SHAPE:
                 - Start with "Imagine..." or "Think about..."
-                - Use comparisons to things I know
-                - Make it interesting to read
-                - Show why this is useful in real life
-                - End with why I should care
+                - Use one memorable comparison to something familiar
+                - Keep it vivid but still factually grounded
+                - Stay around 4 to 6 sentences unless the user asks for more
+                - End with why this matters in real life
             """.trimIndent()
             
             ResponseMode.THEORY -> """
-                Give me the deep, theoretical understanding.
+                THEORY MODE. This is the deepest built-in mode.
+                MANDATORY RESPONSE SHAPE:
                 - Explain the big picture first
-                - Go into the main ideas and concepts
-                - Show how it connects to other things
-                - Talk about the background and history
-                - Be thorough and accurate
+                - Then go into the main concepts and how they connect
+                - Include background, principles, or history when relevant
+                - Be thorough and accurate, but still organized
+                - Prefer 2 to 4 solid paragraphs instead of one huge block
             """.trimIndent()
         }
 
-        val levelInstructions = when (userLevel) {
-            UserLevel.BASIC -> """
-                Learner level: Basic.
-                - Prefer simple words and shorter sentences
-                - Avoid heavy jargon unless the user asks for it
-                - Use one concrete example when it helps understanding
-            """.trimIndent()
-
-            UserLevel.SMART -> """
-                Learner level: Smart.
-                - Give a complete explanation, not just the shortest possible answer
-                - Include useful nuance when it improves understanding
-                - Use examples, comparisons, or edge cases when they help
-            """.trimIndent()
-        }
+        val levelInstructions = buildLearnerLevelInstructions(mode, userLevel)
 
         val companionCalibration = when (userLevel) {
             UserLevel.BASIC -> """
@@ -253,6 +247,8 @@ class PromptBuilder {
                 - DO NOT use markdown markers like ** or ## because the app shows plain text.
                 - Stay honest that you are an AI companion if the user directly asks, but otherwise keep the reply inside the natural relationship flow.
                 - Use recent chat turns and remembered details only when relevant, and ignore uncertain details instead of forcing them in.
+                - Relationship-stage guidance from memory is binding. Do not jump from new connection to soulmates or life-partner language unless the ongoing history clearly supports it.
+                - Let affection evolve gradually across many chats: first warmth and curiosity, then comfort, then stronger romance, then deep long-term attachment.
             """.trimIndent()
         } else {
             """
@@ -272,6 +268,8 @@ class PromptBuilder {
                 - DO NOT use markdown markers like ** or ## because the app shows plain text
                 - DO NOT output numbered meta-headers (avoid "1. Definition", "2. Examples", etc.)
                 - When the chosen mode needs structure, prioritize format accuracy over free-flowing prose
+                - The CURRENT mode overrides any style implied by learner level or earlier assistant replies
+                - Do not continue old formatting from previous assistant messages if it conflicts with the current mode
                 - Never sound like customer support. Avoid lines like "How can I help you today?" for greetings, casual check-ins, or emotional chats.
                 - Keep responses concise but complete
                 - Use recent chat turns and remembered past-chat details only when they are relevant to the new question
@@ -332,6 +330,39 @@ class PromptBuilder {
             - Never let the structure make you sound robotic.
         """.trimIndent()
     }
+
+    private fun buildLearnerLevelInstructions(mode: ResponseMode, userLevel: UserLevel): String =
+        when (userLevel) {
+            UserLevel.BASIC -> """
+                Learner level: Basic.
+                - Prefer simple words and shorter sentences
+                - Avoid heavy jargon unless the user asks for it
+                - Use one concrete example when it helps understanding
+            """.trimIndent()
+
+            UserLevel.SMART -> when (mode) {
+                ResponseMode.DIRECT -> """
+                    Learner level: Smart.
+                    - Stay brief even for smart users
+                    - Add nuance only if it fits inside the short direct reply
+                    - Do not turn Direct mode into Explain or Theory mode
+                """.trimIndent()
+
+                ResponseMode.ANSWER -> """
+                    Learner level: Smart.
+                    - Be clear and slightly richer than Direct mode
+                    - Include useful nuance only when it keeps the reply compact
+                    - Prefer one crisp example over a long expansion
+                """.trimIndent()
+
+                else -> """
+                    Learner level: Smart.
+                    - Give a complete explanation, not just the shortest possible answer
+                    - Include useful nuance when it improves understanding
+                    - Use examples, comparisons, or edge cases when they help
+                """.trimIndent()
+            }
+        }
 
     private fun isCompanionPrompt(customPrompt: String?): Boolean {
         val normalized = customPrompt?.lowercase().orEmpty()

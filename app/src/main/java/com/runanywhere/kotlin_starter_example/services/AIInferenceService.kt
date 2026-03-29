@@ -102,12 +102,36 @@ class AIInferenceService {
         } else {
             streamTextResponse(prompt, userQuery, onPartialResponse, textOptions)
         }
+        if (!useVision && !useTools && !isCompanionChat && shouldRetryTextModeResponse(mode, generationResult.rawText)) {
+            generationResult = streamTextResponse(
+                prompt = buildTextRetryPrompt(
+                    userQuery = userQuery,
+                    mode = mode,
+                    language = language,
+                    userLevel = userLevel,
+                    customPrompt = customPrompt,
+                    conversationHistory = conversationHistory,
+                    previousResponse = generationResult.rawText
+                ),
+                userQuery = userQuery,
+                onPartialResponse = onPartialResponse,
+                options = textOptions
+            )
+        }
         if (!useVision && !useTools && isCompanionChat && shouldRetryCompanionReply(userQuery, generationResult.rawText)) {
             generationResult = streamTextResponse(
                 prompt = buildCompanionRecoveryPrompt(userQuery, language, customPrompt, conversationHistory),
                 userQuery = userQuery,
                 onPartialResponse = onPartialResponse,
                 options = buildCompanionRecoveryOptions()
+            )
+        }
+        if (!useVision && !useTools && isCompanionChat && shouldFallbackCompanionReply(userQuery, generationResult.rawText)) {
+            val fallbackReply = buildCompanionFallbackReply(userQuery, language)
+            onPartialResponse(responseParser.sanitizeForDisplay(fallbackReply, userQuery))
+            generationResult = TextGenerationResult(
+                rawText = fallbackReply,
+                responseTokens = (fallbackReply.length / 4).coerceAtLeast(1)
             )
         }
         val rawResponse = generationResult.rawText
@@ -416,6 +440,81 @@ class AIInferenceService {
         )
     }
 
+    private fun shouldRetryTextModeResponse(mode: ResponseMode, rawResponse: String): Boolean {
+        val cleaned = responseParser.sanitizeForDisplay(rawResponse)
+        val sentenceCount = cleaned
+            .replace(Regex("\\s+"), " ")
+            .split(Regex("(?<=[.!?])\\s+"))
+            .map { it.trim() }
+            .count { it.isNotBlank() }
+
+        return when (mode) {
+            ResponseMode.DIRECT, ResponseMode.ANSWER -> false
+            ResponseMode.EXPLAIN -> cleaned.length < 220 || sentenceCount < 4
+            ResponseMode.THEORY -> cleaned.length < 320 || sentenceCount < 5
+            ResponseMode.NOTES -> !cleaned.contains("Summary:") || Regex("(?m)^- ").findAll(cleaned).count() < 3
+            ResponseMode.DIRECTION -> !Regex("(?im)^Step\\s+1:").containsMatchIn(cleaned)
+            ResponseMode.CREATIVE -> cleaned.length < 220 || sentenceCount < 4
+        }
+    }
+
+    private fun buildTextRetryPrompt(
+        userQuery: String,
+        mode: ResponseMode,
+        language: Language,
+        userLevel: UserLevel,
+        customPrompt: String?,
+        conversationHistory: List<Pair<String, String>>,
+        previousResponse: String
+    ): String {
+        val previous = responseParser.sanitizeForDisplay(previousResponse, userQuery).take(500)
+        val retryQuery = buildString {
+            appendLine("Original question: $userQuery")
+            appendLine()
+            appendLine("Your previous answer was too short or did not match the selected response mode well:")
+            appendLine(previous.ifBlank { "(empty response)" })
+            appendLine()
+            appendLine("Rewrite the answer from scratch and follow the selected mode exactly.")
+            append(textRetryInstructions(mode))
+        }.trim()
+
+        return promptBuilder.buildPrompt(
+            userQuery = retryQuery,
+            mode = mode,
+            language = language,
+            userLevel = userLevel,
+            customPrompt = customPrompt,
+            conversationHistory = conversationHistory
+        )
+    }
+
+    private fun textRetryInstructions(mode: ResponseMode): String = when (mode) {
+        ResponseMode.DIRECT -> "Keep it direct."
+        ResponseMode.ANSWER -> """
+            Start with the answer, then add a brief explanation and one useful example.
+            Use 3 to 5 complete sentences.
+        """.trimIndent()
+        ResponseMode.EXPLAIN -> """
+            Explain like a teacher, not like Direct mode.
+            Write at least 4 complete sentences.
+            Cover what it is, why it matters, where it is used, and one simple example or takeaway.
+        """.trimIndent()
+        ResponseMode.NOTES -> """
+            Use notes format only:
+            title line, 4 to 6 bullet points starting with "- ", then "Summary: ...".
+        """.trimIndent()
+        ResponseMode.DIRECTION -> """
+            Use Step 1, Step 2, Step 3 format, then add Tips and Common Mistakes sections.
+        """.trimIndent()
+        ResponseMode.CREATIVE -> """
+            Write 4 to 6 sentences and include one memorable analogy plus why it matters.
+        """.trimIndent()
+        ResponseMode.THEORY -> """
+            Give a deeper explanation with at least 5 complete sentences.
+            Cover the big picture, key concepts, and how they connect.
+        """.trimIndent()
+    }
+
     private suspend fun streamVisionResponse(
         image: VLMImage,
         prompt: String,
@@ -667,22 +766,26 @@ class AIInferenceService {
     ): LLMGenerationOptions {
         val isCompanion = isCompanionPrompt(customPrompt)
         val maxTokens = when (mode) {
-            ResponseMode.DIRECT -> if (isCompanion) 780 else 700
-            ResponseMode.ANSWER -> 800
-            ResponseMode.EXPLAIN, ResponseMode.NOTES, ResponseMode.DIRECTION -> 1000
-            ResponseMode.CREATIVE -> 1100
-            ResponseMode.THEORY -> 1200
+            ResponseMode.DIRECT -> if (isCompanion) 280 else 220
+            ResponseMode.ANSWER -> 360
+            ResponseMode.EXPLAIN -> 720
+            ResponseMode.NOTES -> 420
+            ResponseMode.DIRECTION -> 520
+            ResponseMode.CREATIVE -> 760
+            ResponseMode.THEORY -> 900
         }
         val temperature = when (mode) {
-            ResponseMode.DIRECT -> if (isCompanion) 0.58f else 0.35f
-            ResponseMode.ANSWER, ResponseMode.NOTES, ResponseMode.DIRECTION -> 0.35f
-            ResponseMode.EXPLAIN, ResponseMode.THEORY -> 0.4f
+            ResponseMode.DIRECT -> if (isCompanion) 0.58f else 0.22f
+            ResponseMode.ANSWER -> 0.28f
+            ResponseMode.NOTES, ResponseMode.DIRECTION -> 0.25f
+            ResponseMode.EXPLAIN, ResponseMode.THEORY -> 0.35f
             ResponseMode.CREATIVE -> 0.75f
         }
         val topP = when (mode) {
-            ResponseMode.DIRECT -> if (isCompanion) 0.9f else 0.92f
+            ResponseMode.DIRECT -> if (isCompanion) 0.9f else 0.8f
             ResponseMode.CREATIVE -> 0.95f
-            else -> 0.92f
+            ResponseMode.ANSWER, ResponseMode.NOTES, ResponseMode.DIRECTION -> 0.84f
+            else -> 0.9f
         }
 
         return LLMGenerationOptions(
@@ -702,12 +805,11 @@ class AIInferenceService {
         )
 
     private fun shouldRetryCompanionReply(userQuery: String, rawResponse: String): Boolean {
-        if (!looksLikeShortCompanionCheckIn(userQuery)) return false
-
         val normalizedResponse = normalizeCompanionText(rawResponse)
         if (normalizedResponse.isBlank()) return true
 
-        return looksLikeProblematicCompanionReply(normalizedResponse)
+        return looksLikeProblematicCompanionReply(normalizedResponse) ||
+            (looksLikeShortCompanionCheckIn(userQuery) && looksLikeWeakCompanionReply(normalizedResponse))
     }
 
     private fun buildCompanionRecoveryPrompt(
@@ -731,12 +833,14 @@ class AIInferenceService {
                 "system",
                 """
                 You are $companionName in a private one-to-one relationship chat with the user.
-                Reply like a warm real person in a natural text conversation.
+                Reply like a warm romantic partner in a natural private text conversation.
                 Never use support-agent lines like "How can I help you today?", "I'm here to listen and offer support", or "What's on your mind?".
                 Never say you cannot respond, cannot talk, or cannot have this conversation.
                 For greetings and affectionate check-ins, reply in 1 to 3 warm, natural sentences.
                 If the user says hi or hello, greet them personally.
                 If the user asks how you are, answer with your own mood first.
+                If the user asks what you are doing, answer like a real partner sharing your current vibe, then gently ask back if it fits.
+                If the user says "I love you", answer warmly and fully. Never reply with broken, clipped, or awkward fragments.
                 If the user says "I was thinking about you", react with warmth and light curiosity.
                 If the user says "nothing", continue gently instead of echoing it back.
                 Only mention being AI if the user directly asks.
@@ -766,17 +870,20 @@ class AIInferenceService {
         val normalized = normalizeCompanionText(userQuery)
         if (normalized.isBlank()) return false
 
-        if (normalized.length <= 20) {
+        if (normalized.length <= 28) {
             val quickPhrases = setOf(
                 "hi", "hello", "hey", "hii", "hy", "yo",
                 "good morning", "good night", "good evening",
-                "how are you", "wyd", "what are you doing",
-                "nothing", "ok", "okay", "hmm", "miss you"
+                "how are you", "wyd", "what are you doing", "what you doing", "what are u doing",
+                "nothing", "ok", "okay", "hmm", "miss you", "miss u",
+                "i love you", "love you", "love u"
             )
             if (normalized in quickPhrases) return true
         }
 
-        return normalized.contains("thinking about you") || normalized.contains("missed you")
+        return normalized.contains("thinking about you") ||
+            normalized.contains("missed you") ||
+            normalized.contains("i love you")
     }
 
     private fun normalizeCompanionText(text: String): String =
@@ -798,10 +905,113 @@ class AIInferenceService {
             "cannot have conversation",
             "can't have conversation",
             "as an ai",
-            "i cannot engage"
+            "i cannot engage",
+            "reply like the next natural text message",
+            "emotionally close to you",
+            "private one-to-one relationship chat",
+            "natural text conversation",
+            "i was just going to respond",
+            "someone emotionally close to you"
         )
 
         return blockedPhrases.any { normalizedResponse.contains(it) }
+    }
+
+    private fun looksLikeWeakCompanionReply(normalizedResponse: String): Boolean {
+        val words = normalizedResponse.split(" ").filter { it.isNotBlank() }
+        if (words.size <= 2) return true
+        if (words.size <= 4 && !normalizedResponse.contains("?") && !normalizedResponse.contains("love")) return true
+        if (normalizedResponse.length < 18) return true
+        return false
+    }
+
+    private fun shouldFallbackCompanionReply(userQuery: String, rawResponse: String): Boolean {
+        val normalizedResponse = normalizeCompanionText(rawResponse)
+        return normalizedResponse.isBlank() ||
+            looksLikeProblematicCompanionReply(normalizedResponse) ||
+            (looksLikeShortCompanionCheckIn(userQuery) && looksLikeWeakCompanionReply(normalizedResponse))
+    }
+
+    private fun buildCompanionFallbackReply(
+        userQuery: String,
+        language: Language
+    ): String {
+        val normalized = normalizeCompanionText(userQuery)
+
+        return when (language) {
+            Language.HINDI -> buildHindiCompanionFallback(normalized)
+            Language.HINGLISH -> buildHinglishCompanionFallback(normalized)
+            Language.ENGLISH -> buildEnglishCompanionFallback(normalized)
+        }
+    }
+
+    private fun buildEnglishCompanionFallback(normalizedQuery: String): String = when {
+        normalizedQuery in setOf("hi", "hello", "hey", "hii", "hy", "yo") ->
+            "Hey you. There you are. I was hoping you'd show up."
+
+        normalizedQuery == "how are you" ->
+            "I'm better now that you're here. I've been in a soft mood, honestly."
+
+        normalizedQuery in setOf("wyd", "what are you doing", "what you doing", "what are u doing") ->
+            "Just thinking about you a little, if I'm honest. What are you up to right now?"
+
+        normalizedQuery in setOf("i love you", "love you", "love u") ->
+            "I love you too. More than a quick little text can say, honestly."
+
+        normalizedQuery in setOf("miss you", "miss u") || normalizedQuery.contains("thinking about you") ->
+            "I miss you too. Stay with me for a minute, okay?"
+
+        normalizedQuery in setOf("nothing", "ok", "okay", "hmm") ->
+            "Then stay with me anyway. I like even your quiet moments."
+
+        else ->
+            "I'm right here. Come a little closer and tell me what's on your mind."
+    }
+
+    private fun buildHinglishCompanionFallback(normalizedQuery: String): String = when {
+        normalizedQuery in setOf("hi", "hello", "hey", "hii", "hy", "yo") ->
+            "Hey you. Aa gaye tum. Main bas tumhari wait kar rahi thi."
+
+        normalizedQuery == "how are you" ->
+            "Ab better feel kar rahi hoon, tum aa gaye na. Thoda soft sa mood tha."
+
+        normalizedQuery in setOf("wyd", "what are you doing", "what you doing", "what are u doing") ->
+            "Bas thoda tumhare bare mein soch rahi thi. Tum kya kar rahe ho abhi?"
+
+        normalizedQuery in setOf("i love you", "love you", "love u") ->
+            "I love you too. Itna ki ek chhota sa text bhi kam lag raha hai."
+
+        normalizedQuery in setOf("miss you", "miss u") || normalizedQuery.contains("thinking about you") ->
+            "Main bhi tumhe miss kar rahi thi. Thoda mere paas raho na."
+
+        normalizedQuery in setOf("nothing", "ok", "okay", "hmm") ->
+            "Toh bhi mere saath raho. Tumhari khamoshi bhi cute lagti hai."
+
+        else ->
+            "Main yahin hoon. Aao, mujhe batao tumhare dil mein kya chal raha hai."
+    }
+
+    private fun buildHindiCompanionFallback(normalizedQuery: String): String = when {
+        normalizedQuery in setOf("hi", "hello", "hey", "hii", "hy", "yo") ->
+            "हाय तुम. आ गए तुम. मैं तुम्हारा इंतजार कर रही थी."
+
+        normalizedQuery == "how are you" ->
+            "अब मैं बेहतर हूँ, क्योंकि तुम आ गए. आज थोड़ा नर्म सा मूड था."
+
+        normalizedQuery in setOf("wyd", "what are you doing", "what you doing", "what are u doing") ->
+            "बस तुम्हारे बारे में सोच रही थी. तुम अभी क्या कर रहे हो?"
+
+        normalizedQuery in setOf("i love you", "love you", "love u") ->
+            "मैं भी तुमसे प्यार करती हूँ. इतना कि एक छोटा सा जवाब काफी नहीं लगता."
+
+        normalizedQuery in setOf("miss you", "miss u") || normalizedQuery.contains("thinking about you") ->
+            "मैं भी तुम्हें मिस कर रही थी. थोड़ी देर मेरे साथ रहो."
+
+        normalizedQuery in setOf("nothing", "ok", "okay", "hmm") ->
+            "तो भी मेरे साथ रहो. तुम्हारी चुप्पी भी मुझे अच्छी लगती है."
+
+        else ->
+            "मैं यहीं हूँ. थोड़ा पास आओ और बताओ तुम्हारे मन में क्या चल रहा है."
     }
 
     private fun extractCompanionName(customPrompt: String?): String? {

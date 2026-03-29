@@ -1,6 +1,9 @@
 package com.runanywhere.kotlin_starter_example.data.local
 
 import android.content.Context
+import com.runanywhere.kotlin_starter_example.data.models.enums.Language
+import com.runanywhere.kotlin_starter_example.data.models.enums.ResponseMode
+import com.runanywhere.kotlin_starter_example.domain.models.StructuredResponse
 import com.runanywhere.kotlin_starter_example.ui.screens.algsoch.ChatMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -54,7 +57,10 @@ class ChatHistoryManager(private val context: Context) {
                 messageCount = sessionMessages.size,
                 questionCount = sessionMessages.count { it.isUser },
                 title = deriveSessionTitle(sessionMessages, file.nameWithoutExtension, file.lastModified()),
-                preview = deriveSessionPreview(sessionMessages)
+                preview = deriveAssistantPreview(sessionMessages),
+                userPreview = deriveUserPreview(sessionMessages),
+                assistantPreview = deriveAssistantPreview(sessionMessages),
+                assistantName = deriveAssistantName(sessionMessages)
             )
         }.sortedByDescending { it.lastModified }
     }
@@ -214,6 +220,7 @@ class ChatHistoryManager(private val context: Context) {
                 append("    \"isUser\": ${msg.isUser},\n")
                 append("    \"text\": \"${escapeJsonString(storedText)}\",\n")
                 append("    \"assistantLabel\": ${msg.assistantLabel?.let { "\"${escapeJsonString(it)}\"" } ?: "null"},\n")
+                appendStructuredResponseJson(msg.structuredResponse)
                 append("    \"feedbackType\": ${msg.feedbackType?.name?.let { "\"$it\"" } ?: "null"}\n")
                 append("  }")
                 if (index < messages.size - 1) append(",")
@@ -239,6 +246,7 @@ class ChatHistoryManager(private val context: Context) {
                         val isUser = extractJsonValue(objStr, "isUser").toBoolean()
                         val text = extractJsonValue(objStr, "text")
                         val assistantLabel = extractJsonValue(objStr, "assistantLabel").takeUnless { it == "null" || it.isBlank() }
+                        val structuredResponse = parseStructuredResponse(objStr, text)
                         val restoredText = text.ifBlank {
                             if (isUser) "" else "[Older saved reply unavailable]"
                         }
@@ -249,7 +257,8 @@ class ChatHistoryManager(private val context: Context) {
                                 text = restoredText,
                                 isUser = isUser,
                                 timestamp = timestamp,
-                                assistantLabel = assistantLabel
+                                assistantLabel = assistantLabel,
+                                structuredResponse = structuredResponse
                             )
                         )
                     }
@@ -306,6 +315,53 @@ class ChatHistoryManager(private val context: Context) {
     private fun messageTextForStorage(message: ChatMessage): String =
         message.text.ifBlank { message.structuredResponse?.toDisplayText().orEmpty() }
 
+    private fun StringBuilder.appendStructuredResponseJson(structuredResponse: StructuredResponse?) {
+        if (structuredResponse == null) return
+
+        append("    \"mode\": \"${structuredResponse.mode.name}\",\n")
+        append("    \"language\": \"${structuredResponse.language.name}\",\n")
+        append("    \"directAnswer\": \"${escapeJsonString(structuredResponse.directAnswer)}\",\n")
+        append("    \"quickExplanation\": \"${escapeJsonString(structuredResponse.quickExplanation)}\",\n")
+        append("    \"deepExplanation\": ${structuredResponse.deepExplanation?.let { "\"${escapeJsonString(it)}\"" } ?: "null"},\n")
+        append("    \"modelName\": \"${escapeJsonString(structuredResponse.modelName)}\",\n")
+        append("    \"tokensUsed\": ${structuredResponse.tokensUsed},\n")
+        append("    \"promptTokens\": ${structuredResponse.promptTokens},\n")
+        append("    \"responseTokens\": ${structuredResponse.responseTokens},\n")
+        append("    \"responseTimeMs\": ${structuredResponse.responseTimeMs},\n")
+        append("    \"timeToFirstTokenMs\": ${structuredResponse.timeToFirstTokenMs ?: "null"},\n")
+    }
+
+    private fun parseStructuredResponse(jsonObject: String, fallbackText: String): StructuredResponse? {
+        val modeRaw = extractJsonValue(jsonObject, "mode").takeUnless { it == "null" || it.isBlank() } ?: return null
+        val languageRaw = extractJsonValue(jsonObject, "language").takeUnless { it == "null" || it.isBlank() } ?: return null
+
+        val mode = runCatching { ResponseMode.valueOf(modeRaw) }.getOrNull() ?: return null
+        val language = runCatching { Language.valueOf(languageRaw) }.getOrNull() ?: Language.ENGLISH
+        val directAnswer = extractJsonValue(jsonObject, "directAnswer").ifBlank { fallbackText }
+        val quickExplanation = extractJsonValue(jsonObject, "quickExplanation").takeUnless { it == "null" } ?: ""
+        val deepExplanation = extractJsonValue(jsonObject, "deepExplanation").takeUnless { it == "null" || it.isBlank() }
+        val modelName = extractJsonValue(jsonObject, "modelName").takeUnless { it == "null" || it.isBlank() } ?: "SmolLM2-360M"
+        val tokensUsed = extractJsonValue(jsonObject, "tokensUsed").toIntOrNull() ?: 0
+        val promptTokens = extractJsonValue(jsonObject, "promptTokens").toIntOrNull() ?: 0
+        val responseTokens = extractJsonValue(jsonObject, "responseTokens").toIntOrNull() ?: 0
+        val responseTimeMs = extractJsonValue(jsonObject, "responseTimeMs").toLongOrNull() ?: 0L
+        val timeToFirstTokenMs = extractJsonValue(jsonObject, "timeToFirstTokenMs").toLongOrNull()
+
+        return StructuredResponse(
+            directAnswer = directAnswer,
+            quickExplanation = quickExplanation,
+            deepExplanation = deepExplanation,
+            mode = mode,
+            language = language,
+            modelName = modelName,
+            tokensUsed = tokensUsed,
+            promptTokens = promptTokens,
+            responseTokens = responseTokens,
+            responseTimeMs = responseTimeMs,
+            timeToFirstTokenMs = timeToFirstTokenMs
+        )
+    }
+
     private fun escapeJsonString(text: String): String =
         text
             .replace("\\", "\\\\")
@@ -331,7 +387,17 @@ class ChatHistoryManager(private val context: Context) {
         }
     }
 
-    private fun deriveSessionPreview(messages: List<ChatMessage>): String {
+    private fun deriveUserPreview(messages: List<ChatMessage>): String {
+        val lastUserMessage = messages
+            .asReversed()
+            .firstOrNull { it.isUser && isUsefulSessionText(it.text) }
+            ?.text
+            ?.singleLine()
+
+        return lastUserMessage?.take(96) ?: "Open this chat to continue learning."
+    }
+
+    private fun deriveAssistantPreview(messages: List<ChatMessage>): String {
         val lastAssistantMessage = messages
             .asReversed()
             .firstOrNull { !it.isUser && isUsefulSessionText(it.text) }
@@ -342,14 +408,16 @@ class ChatHistoryManager(private val context: Context) {
             return lastAssistantMessage.take(96)
         }
 
-        val lastUserMessage = messages
-            .asReversed()
-            .firstOrNull { it.isUser && isUsefulSessionText(it.text) }
-            ?.text
-            ?.singleLine()
-
-        return lastUserMessage?.take(96) ?: "Open this chat to continue learning."
+        return deriveUserPreview(messages)
     }
+
+    private fun deriveAssistantName(messages: List<ChatMessage>): String? =
+        messages
+            .asReversed()
+            .firstOrNull { !it.isUser && !it.assistantLabel.isNullOrBlank() }
+            ?.assistantLabel
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
 
     private fun humanizeFallbackName(rawName: String, lastModified: Long): String {
         val cleaned = canonicalSessionName(rawName).replace('_', ' ').trim()
@@ -381,7 +449,10 @@ data class ChatSession(
     val messageCount: Int,
     val questionCount: Int = 0,
     val title: String = name,
-    val preview: String = ""
+    val preview: String = "",
+    val userPreview: String = "",
+    val assistantPreview: String = "",
+    val assistantName: String? = null
 )
 
 data class GlobalChatStats(
