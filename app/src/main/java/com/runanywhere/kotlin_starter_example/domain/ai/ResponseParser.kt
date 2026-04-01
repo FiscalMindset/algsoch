@@ -298,7 +298,8 @@ class ResponseParser {
     }
 
     private fun flattenForProse(text: String): String =
-        text.lines()
+        normalizeInlineNumberingForProse(text)
+            .lines()
             .map(::cleanListItem)
             .filter { it.isNotBlank() }
             .joinToString(" ")
@@ -415,7 +416,15 @@ class ResponseParser {
             lines.removeAt(lines.lastIndex)
         }
 
-        return lines.joinToString("\n").trim()
+        var cleaned = lines.joinToString("\n").trim()
+        if (
+            Regex("""\b\d+\.\s+[A-Za-z]""").containsMatchIn(cleaned) &&
+            Regex("""\b\d+[.)]?\s*$""").containsMatchIn(cleaned)
+        ) {
+            cleaned = cleaned.replace(Regex("""\s+\d+[.)]?\s*$"""), "").trim()
+        }
+
+        return cleaned
     }
 
     private fun collapseBrokenListLeadIn(text: String): String {
@@ -475,4 +484,9 @@ class ResponseParser {
             .replace(Regex("(?i)^common mistakes:\\s*"), "")
             .replace(Regex("(?i)^summary:\\s*"), "")
             .trim()
+
+    private fun normalizeInlineNumberingForProse(text: String): String =
+        text
+            .replace(Regex("""(?<=[:.;])\s*\d+\.\s+"""), " ")
+            .replace(Regex("""\s{2,}"""), " ")
 }

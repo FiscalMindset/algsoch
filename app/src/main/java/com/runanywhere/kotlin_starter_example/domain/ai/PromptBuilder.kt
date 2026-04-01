@@ -128,7 +128,9 @@ class PromptBuilder {
                 - Sound natural, like a quick text reply from a smart friend
                 - If the question is product-specific or platform-specific but the exact product is unclear, give the safest general answer and ask at most one short clarifying question
                 - Do not invent vendor-specific features, APIs, or capabilities that the user did not mention
+                - For "how can I use..." or "where is it used..." questions, mention practical use cases inside plain sentences separated by commas, not as a numbered list
                 - Never start a list or write lead-ins like "Here's how..." unless you fully complete that thought in plain sentences
+                - Never end in the middle of a word or after a half-finished example
             """.trimIndent()
             
             ResponseMode.ANSWER -> """
@@ -140,6 +142,8 @@ class PromptBuilder {
                 - Let simple questions stay compact, but expand naturally for how/why/use/build questions
                 - Keep the whole reply to about 3 to 8 sentences total depending on the question
                 - Use short paragraphs, not long essays and not deep theory unless asked
+                - For use-case answers, keep the examples in plain sentences instead of numbered items
+                - Never end after a half-finished example or cut-off word
             """.trimIndent()
             
             ResponseMode.EXPLAIN -> """

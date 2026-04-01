@@ -78,6 +78,36 @@ class TutorReplyGuardTest {
     }
 
     @Test
+    fun retriesTruncatedRealLifeUseCaseReply() {
+        assertTrue(
+            TutorReplyGuard.shouldRetry(
+                userQuery = "how i can python in real life",
+                rawResponse = "Python is a versatile language that can be used in various real-life scenarios. Here are some examples: 1. Web Development: Python is often used for web development, including building websites and web applications using frameworks like Dja"
+            )
+        )
+    }
+
+    @Test
+    fun doesNotRetryCompleteInlineUseCaseReply() {
+        assertFalse(
+            TutorReplyGuard.shouldRetry(
+                userQuery = "how can i use python in real life",
+                rawResponse = "Python can help in real life through automation, simple websites, data analysis, testing, and personal productivity tools."
+            )
+        )
+    }
+
+    @Test
+    fun retriesInlineEnumerationThatEndsWithNextItemNumber() {
+        assertTrue(
+            TutorReplyGuard.shouldRetry(
+                userQuery = "how can i use python in real life",
+                rawResponse = "Python can be used in real-life applications by: 1. Automating tasks: Python is a great language for automating repetitive tasks, such as data processing or file management. 2."
+            )
+        )
+    }
+
+    @Test
     fun retriesWhenDefinitionReplyIgnoresRequestedSubject() {
         assertTrue(
             TutorReplyGuard.shouldRetry(
@@ -143,6 +173,34 @@ class TutorReplyGuardTest {
     }
 
     @Test
+    fun specificFallbackResolvesPythonPronounForGameQuestion() {
+        val fallback = TutorReplyGuard.buildFallbackReply(
+            userQuery = "see how I can use it in creating game",
+            rawResponse = "You can use Python in several ways for game development: 1.",
+            language = Language.ENGLISH,
+            conversationHistory = listOf(
+                "user" to "what is python",
+                "assistant" to "Python is a programming language used for automation and AI."
+            )
+        )
+
+        assertTrue(fallback.contains("Pygame"))
+        assertTrue(fallback.contains("game development"))
+    }
+
+    @Test
+    fun salvagesUsefulSentenceFromIncompleteReply() {
+        val fallback = TutorReplyGuard.buildFallbackReply(
+            userQuery = "how can i use python in creating game",
+            rawResponse = "You can use Python in game development for prototypes, scripting, and tools. Here are some ways: 1.",
+            language = Language.ENGLISH
+        )
+
+        assertTrue(fallback.contains("prototypes"))
+        assertFalse(fallback.contains("Please send it once more"))
+    }
+
+    @Test
     fun specificFallbackHandlesSeriousOpinionQuery() {
         val fallback = TutorReplyGuard.buildFallbackReply(
             userQuery = "what do you think about ram rahim the rapist hindu",
@@ -156,12 +214,13 @@ class TutorReplyGuardTest {
 
     @Test
     fun genericFallbackIsPlainAndDirect() {
-        assertTrue(
-            TutorReplyGuard.buildFallbackReply(
-                userQuery = "tell me more",
-                rawResponse = "",
-                language = Language.ENGLISH
-            ).contains("Please send it once more")
+        val fallback = TutorReplyGuard.buildFallbackReply(
+            userQuery = "tell me more",
+            rawResponse = "",
+            language = Language.ENGLISH
         )
+
+        assertFalse(fallback.contains("Please send it once more"))
+        assertTrue(fallback.isNotBlank())
     }
 }

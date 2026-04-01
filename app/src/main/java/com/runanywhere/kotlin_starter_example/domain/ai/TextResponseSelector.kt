@@ -15,7 +15,15 @@ internal object TextResponseSelector {
     ): String {
         val firstScore = score(mode, userQuery, firstAttempt)
         val retryScore = score(mode, userQuery, retryAttempt)
-        return if (retryScore > firstScore) retryAttempt else firstAttempt
+        val firstNeedsRetry = TutorReplyGuard.shouldRetry(userQuery, firstAttempt)
+        val retryNeedsRetry = TutorReplyGuard.shouldRetry(userQuery, retryAttempt)
+
+        return when {
+            !firstNeedsRetry && retryNeedsRetry -> firstAttempt
+            firstNeedsRetry && !retryNeedsRetry -> retryAttempt
+            retryScore >= firstScore + 1.25 -> retryAttempt
+            else -> firstAttempt
+        }
     }
 
     fun score(
@@ -50,11 +58,13 @@ internal object TextResponseSelector {
                 if (normalized.length in 15..240) score += 2.0
                 if (sentenceCount in 1..3) score += 2.0
                 if (sentenceCount > 4) score -= 1.5
+                if (Regex("""\b\d+\.\s+[A-Za-z]""").containsMatchIn(cleaned)) score -= 3.0
             }
 
             ResponseMode.ANSWER -> {
                 if (normalized.length in 40..420) score += 2.0
                 if (sentenceCount in 2..6) score += 2.5
+                if (Regex("""\b\d+\.\s+[A-Za-z]""").containsMatchIn(cleaned)) score -= 1.5
             }
 
             ResponseMode.EXPLAIN -> {

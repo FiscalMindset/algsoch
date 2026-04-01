@@ -148,4 +148,53 @@ class TextResponseSelectorTest {
 
         assertEquals(firstAttempt, chosen)
     }
+
+    @Test
+    fun directMode_keepsGoodFirstAttemptWhenRetryEndsMidWord() {
+        val firstAttempt = "Python can be used in real life for automation, websites, data analysis, testing, and small tools that save time."
+        val retryAttempt = "Python is a versatile language that can be used in various real-life scenarios. Here are some examples: 1. Web Development: Python is often used for web development, including building websites and web applications using frameworks like Dja"
+
+        val chosen = TextResponseSelector.chooseBetterResponse(
+            mode = ResponseMode.DIRECT,
+            userQuery = "how can i use python in real life",
+            firstAttempt = firstAttempt,
+            retryAttempt = retryAttempt
+        )
+
+        assertEquals(firstAttempt, chosen)
+    }
+
+    @Test
+    fun directMode_doesNotPenalizeCompleteUseCaseSentence() {
+        val complete = "Python can be used in real life for automation, websites, reporting, testing, and personal tools."
+        val broken = "Python can be used in real life in many ways. Here are some examples: 1. Web Development: Python is used for building websites with frameworks like Dja"
+
+        val completeScore = TextResponseSelector.score(
+            mode = ResponseMode.DIRECT,
+            userQuery = "how can i use python in real life",
+            rawResponse = complete
+        )
+        val brokenScore = TextResponseSelector.score(
+            mode = ResponseMode.DIRECT,
+            userQuery = "how can i use python in real life",
+            rawResponse = broken
+        )
+
+        assertTrue(completeScore > brokenScore)
+    }
+
+    @Test
+    fun directMode_keepsGoodFirstAttemptWhenRetryEndsWithDanglingNextItem() {
+        val firstAttempt = "Python can be used in real life for automation, small tools, data work, and websites."
+        val retryAttempt = "Python can be used in real-life applications by: 1. Automating tasks: Python is a great language for automating repetitive tasks, such as data processing or file management. 2."
+
+        val chosen = TextResponseSelector.chooseBetterResponse(
+            mode = ResponseMode.DIRECT,
+            userQuery = "how can i use python in real life",
+            firstAttempt = firstAttempt,
+            retryAttempt = retryAttempt
+        )
+
+        assertEquals(firstAttempt, chosen)
+    }
 }

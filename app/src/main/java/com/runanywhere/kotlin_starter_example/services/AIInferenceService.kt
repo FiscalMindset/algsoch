@@ -174,7 +174,8 @@ class AIInferenceService {
             val fallbackReply = TutorReplyGuard.buildFallbackReply(
                 userQuery = userQuery,
                 rawResponse = generationResult.rawText,
-                language = language
+                language = language,
+                conversationHistory = conversationHistory
             )
             onPartialResponse(responseParser.sanitizeForDisplay(fallbackReply, userQuery))
             generationResult = TextGenerationResult(
@@ -538,22 +539,54 @@ class AIInferenceService {
         if (cleaned.isBlank()) return true
 
         val hasListMarkers = Regex("""(?m)^(?:\d+\.|-|Step\s+\d+:)""", RegexOption.IGNORE_CASE).containsMatchIn(cleaned)
+        val hasInlineListMarkers = Regex("""\b\d+\.\s+[A-Za-z]""").containsMatchIn(cleaned)
         val endsInDanglingItem = Regex("""(?s).+:\s*\d+[.)]?\s*$""").containsMatchIn(cleaned) ||
             Regex("""(?i)\b(and|or|because|with|for|using)\s*$""").containsMatchIn(cleaned)
         val looksLikeBrokenLeadIn = Regex(
             """(?i)\b(?:here(?:'s| is)\s+how|here are|some ways|steps|examples|options)\b[^.!?]{0,160}:\s*\d+[.)]?\s*$"""
         ).containsMatchIn(cleaned)
+        val hasLongUnfinishedTail = looksLikeLongUnfinishedTail(cleaned)
 
-        return hasListMarkers || endsInDanglingItem || looksLikeBrokenLeadIn || sentenceCount == 0
+        return hasListMarkers ||
+            hasInlineListMarkers ||
+            endsInDanglingItem ||
+            looksLikeBrokenLeadIn ||
+            hasLongUnfinishedTail ||
+            sentenceCount == 0
     }
 
     private fun isBrokenAnswerModeResponse(cleaned: String, sentenceCount: Int): Boolean {
         if (cleaned.isBlank()) return true
 
+        val hasInlineListMarkers = Regex("""\b\d+\.\s+[A-Za-z]""").containsMatchIn(cleaned)
         val endsInDanglingItem = Regex("""(?s).+:\s*\d+[.)]?\s*$""").containsMatchIn(cleaned) ||
             Regex("""(?i)\b(and|or|because|with|for|using)\s*$""").containsMatchIn(cleaned)
+        val hasLongUnfinishedTail = looksLikeLongUnfinishedTail(cleaned)
 
-        return endsInDanglingItem || sentenceCount == 0
+        return hasInlineListMarkers || endsInDanglingItem || hasLongUnfinishedTail || sentenceCount == 0
+    }
+
+    private fun looksLikeLongUnfinishedTail(cleaned: String): Boolean {
+        val trimmed = cleaned.trim()
+        if (trimmed.isBlank()) return true
+        if (trimmed.last() in ".!?\"'") return false
+
+        val words = trimmed.split(Regex("\\s+")).filter { it.isNotBlank() }
+        val lastWord = words.lastOrNull().orEmpty()
+        if (lastWord.length in 1..3 && lastWord.any { it.isUpperCase() } && words.size >= 8) {
+            return true
+        }
+
+        val tailStart = listOf(
+            trimmed.lastIndexOf(". "),
+            trimmed.lastIndexOf("! "),
+            trimmed.lastIndexOf("? "),
+            trimmed.lastIndexOf('\n')
+        ).maxOrNull() ?: -1
+        val tail = if (tailStart >= 0) trimmed.substring(tailStart + 1).trim() else trimmed
+        val tailWordCount = tail.split(Regex("\\s+")).count { it.isNotBlank() }
+
+        return tailWordCount >= 14 && (tail.contains(':') || tail.contains(", "))
     }
 
     private fun buildTextRetryPrompt(
@@ -592,13 +625,16 @@ class AIInferenceService {
             For simple fact questions, use 1 to 3 complete sentences.
             For how/why/use/build questions, you may use up to about 3 to 6 complete sentences while staying direct.
             Never use a numbered list, bullets, or steps.
+            For use-case questions, keep examples inside full sentences separated by commas instead of starting a list.
             If the product or platform is unclear, give the safest general answer and ask one short clarifying question instead of inventing details.
-            Never end with a dangling fragment like "1.", "Step 1", or "Here are some ways:".
+            Never end with a dangling fragment like "1.", "Step 1", "Here are some ways:", or a cut-off word.
             Never answer with generic reset lines like "I'm ready to assist you" or "What's the first question?".
         """.trimIndent()
         ResponseMode.ANSWER -> """
             Start with the answer, then add a brief explanation and one useful example.
             Use 3 to 5 complete sentences.
+            Keep examples in plain sentences, not numbered lists.
+            Never end in the middle of a list item or in the middle of a word.
             Never answer with generic reset lines like "I'm ready to assist you" or "What's the first question?".
         """.trimIndent()
         ResponseMode.EXPLAIN -> """

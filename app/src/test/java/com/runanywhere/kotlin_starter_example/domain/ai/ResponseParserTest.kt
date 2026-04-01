@@ -64,6 +64,23 @@ class ResponseParserTest {
     }
 
     @Test
+    fun directMode_stripsDanglingInlineFollowUpItem() {
+        val rawResponse = """
+            Python can be used in real-life applications by: 1. Automating tasks: Python is a great language for automating repetitive tasks, such as data processing or file management. 2.
+        """.trimIndent()
+
+        val parsed = parser.parse(
+            rawResponse = rawResponse,
+            mode = ResponseMode.DIRECT,
+            language = Language.ENGLISH
+        )
+
+        assertFalse(parsed.directAnswer.contains(" 1. "))
+        assertFalse(parsed.directAnswer.trimEnd().endsWith("2."))
+        assertTrue(parsed.directAnswer.contains("Automating tasks"))
+    }
+
+    @Test
     fun answerMode_keepsAnswerFirstAndMovesRestToExplanation() {
         val rawResponse = """
             A variable is a named place to store a value. You use it so the program can reuse and update data easily. For example, age = 20 stores a number. That makes code easier to read. It also avoids repeating the same value everywhere.
