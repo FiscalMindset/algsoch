@@ -1,6 +1,7 @@
 package com.runanywhere.kotlin_starter_example.data.local
 
 import android.content.Context
+import android.net.Uri
 import com.runanywhere.kotlin_starter_example.data.models.enums.FeedbackType
 import com.runanywhere.kotlin_starter_example.data.models.enums.Language
 import com.runanywhere.kotlin_starter_example.data.models.enums.ResponseMode
@@ -326,6 +327,7 @@ internal object ChatHistoryJsonCodec {
                     put("timestamp", message.timestamp)
                     put("isUser", message.isUser)
                     put("text", messageTextForStorage(message))
+                    put("imageUri", message.imageUri?.toString() ?: JSONObject.NULL)
                     put("assistantLabel", message.assistantLabel ?: JSONObject.NULL)
                     put("feedbackType", message.feedbackType?.name ?: JSONObject.NULL)
                     message.structuredResponse?.let { response ->
@@ -386,6 +388,7 @@ internal object ChatHistoryJsonCodec {
                             text = restoredText,
                             isUser = isUser,
                             timestamp = timestamp,
+                            imageUri = parseImageUri(jsonObject.optNullableString("imageUri")),
                             feedbackType = parseFeedbackType(jsonObject.optNullableString("feedbackType")),
                             assistantLabel = jsonObject.optNullableString("assistantLabel"),
                             structuredResponse = structuredResponse
@@ -427,6 +430,9 @@ internal object ChatHistoryJsonCodec {
 
     private fun JSONObject.optNullableLong(key: String): Long? =
         if (isNull(key)) null else optLong(key)
+
+    private fun parseImageUri(rawValue: String?): Uri? =
+        rawValue?.let { value -> runCatching { Uri.parse(value) }.getOrNull() }
 
     private fun parseFeedbackType(rawValue: String?): FeedbackType? =
         rawValue?.let { value -> runCatching { FeedbackType.valueOf(value) }.getOrNull() }

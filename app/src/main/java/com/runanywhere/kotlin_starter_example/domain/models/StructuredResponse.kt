@@ -20,21 +20,10 @@ data class StructuredResponse(
     fun toDisplayText(): String = when (mode) {
         ResponseMode.DIRECT -> directAnswer.trim()
 
-        ResponseMode.ANSWER -> buildSectionedText(
-            "Answer" to directAnswer,
-            "Details" to quickExplanation,
-            "More" to deepExplanation
-        )
-
-        ResponseMode.EXPLAIN -> if (directAnswer.contains("Key Points:") || directAnswer.contains("Takeaway:")) {
-            directAnswer.trim()
-        } else {
-            buildSectionedText(
-                "Explanation" to directAnswer,
-                "Details" to quickExplanation,
-                "More" to deepExplanation
-            )
-        }
+        ResponseMode.ANSWER,
+        ResponseMode.EXPLAIN,
+        ResponseMode.CREATIVE,
+        ResponseMode.THEORY -> joinSections(directAnswer, quickExplanation, deepExplanation)
 
         ResponseMode.NOTES, ResponseMode.DIRECTION -> buildString {
             append(directAnswer.trim())
@@ -50,31 +39,11 @@ data class StructuredResponse(
             }
         }.trim()
 
-        ResponseMode.CREATIVE -> buildSectionedText(
-            "Idea" to directAnswer,
-            "Why It Sticks" to quickExplanation,
-            "More" to deepExplanation
-        )
-
-        ResponseMode.THEORY -> buildSectionedText(
-            "Concept" to directAnswer,
-            "Connections" to quickExplanation,
-            "More" to deepExplanation
-        )
     }
 
-    private fun buildSectionedText(vararg sections: Pair<String, String?>): String =
-        buildString {
-            sections.forEachIndexed { index, (label, content) ->
-                val value = content?.trim().orEmpty()
-                if (value.isBlank()) return@forEachIndexed
-                if (isNotBlank()) {
-                    appendLine()
-                    appendLine()
-                }
-                append(label)
-                append(": ")
-                append(value)
-            }
-        }.trim()
+    private fun joinSections(vararg sections: String?): String =
+        sections
+            .mapNotNull { it?.trim()?.takeIf(String::isNotBlank) }
+            .joinToString("\n\n")
+            .trim()
 }

@@ -12,6 +12,7 @@ internal object TutorReplyGuard {
         if (normalizedResponse.isBlank()) return true
 
         return looksLikeGenericReset(normalizedQuery, normalizedResponse) ||
+            looksLikePromptEchoLeak(rawResponse) ||
             looksLikeSeriousTopicMisclassification(normalizedQuery, normalizedResponse) ||
             looksLikeSeriousTopicFictionalization(normalizedQuery, normalizedResponse) ||
             looksLikeMalformedIncompleteReply(rawResponse, normalizedResponse) ||
@@ -69,6 +70,18 @@ internal object TutorReplyGuard {
         )
 
         return blockedPhrases.any { normalizedResponse.contains(it) }
+    }
+
+    private fun looksLikePromptEchoLeak(rawResponse: String): Boolean {
+        val lowered = rawResponse.lowercase(Locale.getDefault())
+        val queryEchoCount = Regex("""(?i)\b(?:user query|original question|question):""")
+            .findAll(rawResponse)
+            .count()
+
+        return queryEchoCount >= 2 ||
+            lowered.contains("recent chat context:") ||
+            ((lowered.contains("user query:") || lowered.contains("original question:") || lowered.contains("question:")) &&
+                (lowered.contains("answer:") || lowered.contains("response:")))
     }
 
     private fun looksLikeSeriousTopicMisclassification(

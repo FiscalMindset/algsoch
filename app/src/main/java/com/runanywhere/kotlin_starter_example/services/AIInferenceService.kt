@@ -280,7 +280,9 @@ class AIInferenceService {
             Start with the main subject, then include visible text, UI, or structure, then explain the likely meaning or purpose.
             Never answer with only one or two words.
             Never include special tokens such as <end_of_utterance> in your reply.
-            Use recent chat context when it helps the response feel continuous, but do not invent details that are not visible.
+            Ignore unrelated earlier chat topics unless the current user explicitly connects them to the image.
+            Never echo prompt scaffolding such as "User query:", "Answer:", or "Recent chat context:".
+            Use recent chat context only when it is directly relevant to the same image, and do not invent details that are not visible.
             $assistantContext
             ${visionModeInstructions(mode, retry = false)}
             Respond in $langName.
@@ -312,7 +314,9 @@ class AIInferenceService {
             If the image is blurry or unclear, say that clearly, but still describe what is visible.
             If the image is a personal, casual, or social photo, keep the tone natural and human while staying honest about what is visible.
             Never output special tokens or raw control text.
-            Use recent chat context when it helps the response feel continuous, but do not invent details that are not visible.
+            Ignore unrelated earlier chat topics unless the current user explicitly connects them to the image.
+            Never echo prompt scaffolding such as "User query:", "Answer:", or "Recent chat context:".
+            Use recent chat context only when it is directly relevant to the same image, and do not invent details that are not visible.
             $assistantContext
             ${visionModeInstructions(mode, retry = true)}
             Respond in $langName.
@@ -680,6 +684,8 @@ class AIInferenceService {
         scoreVisionResponse(response) < 3
 
     private fun scoreVisionResponse(response: String): Int {
+        if (looksLikePromptEchoLeak(response)) return 0
+
         val cleaned = response
             .replace(Regex("<[^>]+>"), " ")
             .replace(Regex("\\s+"), " ")
@@ -693,6 +699,18 @@ class AIInferenceService {
         if (cleaned.length >= 50) score += 1
         if (cleaned.contains(".") || cleaned.contains("!") || cleaned.contains("?")) score += 1
         return score
+    }
+
+    private fun looksLikePromptEchoLeak(response: String): Boolean {
+        val lowered = response.lowercase(Locale.getDefault())
+        val queryEchoCount = Regex("""(?i)\b(?:user query|original question|question):""")
+            .findAll(response)
+            .count()
+
+        return queryEchoCount >= 2 ||
+            lowered.contains("recent chat context:") ||
+            ((lowered.contains("user query:") || lowered.contains("original question:") || lowered.contains("question:")) &&
+                (lowered.contains("answer:") || lowered.contains("response:")))
     }
 
     private fun shouldUseTools(userQuery: String, enabledTools: List<String>): Boolean {

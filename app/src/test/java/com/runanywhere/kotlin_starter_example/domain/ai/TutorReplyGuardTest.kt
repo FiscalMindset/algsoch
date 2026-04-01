@@ -108,6 +108,16 @@ class TutorReplyGuardTest {
     }
 
     @Test
+    fun retriesPromptEchoLeak() {
+        assertTrue(
+            TutorReplyGuard.shouldRetry(
+                userQuery = "what is this",
+                rawResponse = "Python is a popular choice for web development. User query: what is this Answer: Web Development: Python frameworks like Django are used for building apps."
+            )
+        )
+    }
+
+    @Test
     fun retriesWhenDefinitionReplyIgnoresRequestedSubject() {
         assertTrue(
             TutorReplyGuard.shouldRetry(

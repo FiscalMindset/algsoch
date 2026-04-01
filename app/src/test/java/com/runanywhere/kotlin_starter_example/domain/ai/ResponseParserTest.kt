@@ -81,6 +81,22 @@ class ResponseParserTest {
     }
 
     @Test
+    fun sanitizeForDisplay_removesPromptEchoAndModeLabel() {
+        val cleaned = parser.sanitizeForDisplay(
+            """
+            Explanation: Web Development: Python's web development frameworks are commonly used for creating websites.
+            User query: how can i use this in life
+            Answer: Python is a versatile language that can be used in many aspects of life.
+            """.trimIndent()
+        )
+
+        assertFalse(cleaned.contains("Explanation:"))
+        assertFalse(cleaned.contains("User query:"))
+        assertFalse(cleaned.contains("Answer:"))
+        assertTrue(cleaned.startsWith("Web Development:"))
+    }
+
+    @Test
     fun answerMode_keepsAnswerFirstAndMovesRestToExplanation() {
         val rawResponse = """
             A variable is a named place to store a value. You use it so the program can reuse and update data easily. For example, age = 20 stores a number. That makes code easier to read. It also avoids repeating the same value everywhere.

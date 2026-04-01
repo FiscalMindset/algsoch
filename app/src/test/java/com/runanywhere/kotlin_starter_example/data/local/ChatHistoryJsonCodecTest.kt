@@ -1,5 +1,4 @@
 package com.runanywhere.kotlin_starter_example.data.local
-
 import com.runanywhere.kotlin_starter_example.data.models.enums.Language
 import com.runanywhere.kotlin_starter_example.data.models.enums.ResponseMode
 import com.runanywhere.kotlin_starter_example.domain.models.GenerationTraceEntry
@@ -95,5 +94,31 @@ class ChatHistoryJsonCodecTest {
 
         assertEquals("Explain \"LangChain\"\nwith an example", restoredMessages.first().text)
         assertEquals("Smart", restoredMessages.last().assistantLabel)
+    }
+
+    @Test
+    fun restoresMessagesEvenWhenImageUriMetadataIsPresent() {
+        val restoredMessages = ChatHistoryJsonCodec.jsonToMessages(
+            """
+            [
+              {
+                "timestamp": 301,
+                "isUser": true,
+                "text": "What is in this image?",
+                "imageUri": "file:///tmp/user-image.png"
+              },
+              {
+                "timestamp": 302,
+                "isUser": false,
+                "text": "It looks like a notes page.",
+                "imageUri": "file:///tmp/analyzed-image.png"
+              }
+            ]
+            """.trimIndent()
+        )
+
+        assertEquals(2, restoredMessages.size)
+        assertEquals("What is in this image?", restoredMessages.first().text)
+        assertEquals("It looks like a notes page.", restoredMessages.last().text)
     }
 }

@@ -39,6 +39,8 @@ class ResponseParser {
             .trim()
 
         cleaned = cleanupMarkdownArtifacts(cleaned)
+        cleaned = stripLeadingDisplayLabels(cleaned)
+        cleaned = stripPromptEchoLeak(cleaned)
 
         userQuery?.let { query ->
             val trimmedQuery = query.trim().lowercase().removeSuffix("?")
@@ -401,6 +403,50 @@ class ResponseParser {
             .replace("**", "")
             .replace("__", "")
             .trim()
+    }
+
+    private fun stripLeadingDisplayLabels(text: String): String {
+        var cleaned = text.trim()
+        val labelPattern = Regex(
+            """(?i)^(?:Explanation|Concept|Connections|Details|More|Idea|Why It Sticks):\s*"""
+        )
+
+        while (labelPattern.containsMatchIn(cleaned)) {
+            cleaned = cleaned.replaceFirst(labelPattern, "").trimStart()
+        }
+
+        return cleaned
+    }
+
+    private fun stripPromptEchoLeak(text: String): String {
+        val trimmed = text.trim()
+        if (trimmed.isBlank()) return trimmed
+
+        val contextStart = Regex("""(?i)\bRecent chat context:""").find(trimmed)?.range?.first ?: -1
+        if (contextStart > 0) {
+            return trimmed.substring(0, contextStart).trim()
+        }
+
+        val promptEchoStart = Regex("""(?i)\b(?:User query|Original question|Question):""")
+            .find(trimmed)
+            ?.range
+            ?.first
+            ?: -1
+        val hasAnswerMarker = Regex("""(?i)\b(?:Answer|Response):""").containsMatchIn(trimmed)
+
+        return when {
+            promptEchoStart > 0 && hasAnswerMarker ->
+                trimmed.substring(0, promptEchoStart).trim()
+
+            promptEchoStart == 0 && hasAnswerMarker ->
+                trimmed.split(Regex("""(?i)\b(?:Answer|Response):\s*"""))
+                    .lastOrNull()
+                    ?.trim()
+                    .orEmpty()
+                    .ifBlank { trimmed }
+
+            else -> trimmed
+        }
     }
 
     private fun removeDanglingTail(text: String): String {

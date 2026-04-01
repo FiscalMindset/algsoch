@@ -26,6 +26,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -300,7 +301,11 @@ class AlgsochViewModel : ViewModel() {
                 }
 
                 val finalQuery = visibleUserQuery
-                val history = buildConversationHistory(finalQuery, selectedCustomMode)
+                val history = buildConversationHistory(
+                    currentQuery = finalQuery,
+                    activeMode = selectedCustomMode,
+                    hasImageInput = imagePath != null
+                )
                 val effectiveMode = selectedCustomMode?.let(::preferredResponseModeFor) ?: selectedMode
                 val assistantMessageId = System.currentTimeMillis() + 1
                 val assistantLabel = selectedCustomMode?.name
@@ -333,6 +338,7 @@ class AlgsochViewModel : ViewModel() {
                     text = response.toDisplayText(),
                     isUser = false,
                     structuredResponse = response,
+                    imageUri = imagePath?.let { Uri.fromFile(File(it)) },
                     assistantLabel = assistantLabel
                 )
                 replacePendingAssistantMessage(assistantMessageId, aiMessage)
@@ -657,8 +663,13 @@ class AlgsochViewModel : ViewModel() {
 
     private suspend fun buildConversationHistory(
         currentQuery: String,
-        activeMode: CustomMode? = selectedCustomMode
+        activeMode: CustomMode? = selectedCustomMode,
+        hasImageInput: Boolean = false
     ): List<Pair<String, String>> {
+        if (hasImageInput) {
+            return emptyList()
+        }
+
         val currentSessionHistory = messages
             .dropLast(1)
             .filter { it.text.isNotBlank() && !it.isPending }

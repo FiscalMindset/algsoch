@@ -828,6 +828,42 @@ private fun MessageBubble(
                             .fillMaxWidth()
                             .padding(20.dp)
                     ) {
+                        message.imageUri?.let { imageUri ->
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 14.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Surface(
+                                    color = AccentBlue.copy(alpha = 0.12f),
+                                    shape = RoundedCornerShape(999.dp)
+                                ) {
+                                    Text(
+                                        text = "Analyzed Image",
+                                        color = AccentBlue,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                    )
+                                }
+                                Surface(
+                                    color = SurfaceSecondary,
+                                    shape = RoundedCornerShape(18.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    AsyncImage(
+                                        model = imageUri,
+                                        contentDescription = "Analyzed image",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(min = 180.dp, max = 260.dp)
+                                    )
+                                }
+                            }
+                        }
+
                         message.structuredResponse?.let { response ->
                             val fullContent = response.toDisplayText().ifBlank {
                                 if (isMissingSavedReply) {
