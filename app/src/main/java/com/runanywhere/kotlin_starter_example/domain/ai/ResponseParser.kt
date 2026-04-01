@@ -129,7 +129,7 @@ class ResponseParser {
     }
 
     private fun normalizeDirect(text: String): String {
-        val flattened = flattenForProse(text)
+        val flattened = collapseBrokenListLeadIn(flattenForProse(text))
         return limitSentences(flattened, maxSentences = 3, maxChars = 240)
     }
 
@@ -416,6 +416,36 @@ class ResponseParser {
         }
 
         return lines.joinToString("\n").trim()
+    }
+
+    private fun collapseBrokenListLeadIn(text: String): String {
+        val trimmed = text.trim()
+        if (trimmed.isBlank()) return trimmed
+
+        val brokenSentence = Regex(
+            """(?is)^(?:here(?:'s| is)\s+how|here are|these are|some ways|ways to|steps to|examples of|options for)[^.!?]{0,180}:\s*\d+[.)]?\s*$"""
+        )
+
+        val sentences = trimmed
+            .split(Regex("(?<=[.!?])\\s+"))
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .toMutableList()
+
+        while (sentences.isNotEmpty() && brokenSentence.matches(sentences.last())) {
+            sentences.removeAt(sentences.lastIndex)
+        }
+
+        val withoutBrokenSentence = if (sentences.isNotEmpty()) {
+            sentences.joinToString(" ")
+        } else {
+            trimmed
+        }
+
+        return withoutBrokenSentence
+            .replace(Regex("""(?is):\s*\d+[.)]?\s*$"""), ".")
+            .replace(Regex("""\s+\.$"""), ".")
+            .trim()
     }
 
     private fun isExplainListLine(line: String): Boolean =

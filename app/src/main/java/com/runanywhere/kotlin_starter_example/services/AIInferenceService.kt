@@ -5,6 +5,8 @@ import com.runanywhere.kotlin_starter_example.data.models.enums.ResponseMode
 import com.runanywhere.kotlin_starter_example.data.models.enums.UserLevel
 import com.runanywhere.kotlin_starter_example.domain.ai.PromptBuilder
 import com.runanywhere.kotlin_starter_example.domain.ai.ResponseParser
+import com.runanywhere.kotlin_starter_example.domain.ai.TextResponseSelector
+import com.runanywhere.kotlin_starter_example.domain.ai.TutorReplyGuard
 import com.runanywhere.kotlin_starter_example.domain.models.ReasoningStep
 import com.runanywhere.kotlin_starter_example.domain.models.StructuredResponse
 import com.runanywhere.sdk.public.RunAnywhere
@@ -67,7 +69,7 @@ class AIInferenceService {
         val visionPrompt = buildVisionPrompt(userQuery, mode, language, customPrompt, conversationHistory)
         val useVision = !imagePath.isNullOrBlank()
         val useTools = !useVision && shouldUseTools(userQuery, enabledTools)
-        val textOptions = buildTextGenerationOptions(mode, customPrompt)
+        val textOptions = buildTextGenerationOptions(userQuery, mode, customPrompt)
         
         // Track response time
         val startTime = System.currentTimeMillis()
@@ -102,8 +104,14 @@ class AIInferenceService {
         } else {
             streamTextResponse(prompt, userQuery, onPartialResponse, textOptions)
         }
-        if (!useVision && !useTools && !isCompanionChat && shouldRetryTextModeResponse(mode, generationResult.rawText)) {
-            generationResult = streamTextResponse(
+        if (
+            !useVision &&
+            !useTools &&
+            !isCompanionChat &&
+            (shouldRetryTextModeResponse(mode, generationResult.rawText) ||
+                TutorReplyGuard.shouldRetry(userQuery, generationResult.rawText))
+        ) {
+            val retryResult = streamTextResponse(
                 prompt = buildTextRetryPrompt(
                     userQuery = userQuery,
                     mode = mode,
@@ -116,6 +124,30 @@ class AIInferenceService {
                 userQuery = userQuery,
                 onPartialResponse = onPartialResponse,
                 options = textOptions
+            )
+            generationResult = if (
+                TextResponseSelector.chooseBetterResponse(
+                    mode = mode,
+                    userQuery = userQuery,
+                    firstAttempt = generationResult.rawText,
+                    retryAttempt = retryResult.rawText
+                ) == retryResult.rawText
+            ) {
+                retryResult
+            } else {
+                generationResult
+            }
+        }
+        if (!useVision && !useTools && !isCompanionChat && TutorReplyGuard.shouldRetry(userQuery, generationResult.rawText)) {
+            val fallbackReply = TutorReplyGuard.buildFallbackReply(
+                userQuery = userQuery,
+                rawResponse = generationResult.rawText,
+                language = language
+            )
+            onPartialResponse(responseParser.sanitizeForDisplay(fallbackReply, userQuery))
+            generationResult = TextGenerationResult(
+                rawText = fallbackReply,
+                responseTokens = 0
             )
         }
         if (!useVision && !useTools && isCompanionChat && shouldRetryCompanionReply(userQuery, generationResult.rawText)) {
@@ -137,8 +169,8 @@ class AIInferenceService {
         val rawResponse = generationResult.rawText
         
         val responseTime = System.currentTimeMillis() - startTime
-        
-        // Estimate token usage (rough approximation: 1 token ≈ 4 characters)
+
+        // Estimate token usage for metadata display.
         val promptTokens = when {
             useVision -> visionPrompt.length / 4
             useTools -> (toolPromptSpec.systemPrompt.length + toolPromptSpec.prompt.length) / 4
@@ -449,13 +481,36 @@ class AIInferenceService {
             .count { it.isNotBlank() }
 
         return when (mode) {
-            ResponseMode.DIRECT, ResponseMode.ANSWER -> false
+            ResponseMode.DIRECT -> isBrokenDirectModeResponse(cleaned, sentenceCount)
+            ResponseMode.ANSWER -> isBrokenAnswerModeResponse(cleaned, sentenceCount)
             ResponseMode.EXPLAIN -> cleaned.length < 220 || sentenceCount < 4
             ResponseMode.THEORY -> cleaned.length < 320 || sentenceCount < 5
             ResponseMode.NOTES -> !cleaned.contains("Summary:") || Regex("(?m)^- ").findAll(cleaned).count() < 3
             ResponseMode.DIRECTION -> !Regex("(?im)^Step\\s+1:").containsMatchIn(cleaned)
             ResponseMode.CREATIVE -> cleaned.length < 220 || sentenceCount < 4
         }
+    }
+
+    private fun isBrokenDirectModeResponse(cleaned: String, sentenceCount: Int): Boolean {
+        if (cleaned.isBlank()) return true
+
+        val hasListMarkers = Regex("""(?m)^(?:\d+\.|-|Step\s+\d+:)""", RegexOption.IGNORE_CASE).containsMatchIn(cleaned)
+        val endsInDanglingItem = Regex("""(?s).+:\s*\d+[.)]?\s*$""").containsMatchIn(cleaned) ||
+            Regex("""(?i)\b(and|or|because|with|for|using)\s*$""").containsMatchIn(cleaned)
+        val looksLikeBrokenLeadIn = Regex(
+            """(?i)\b(?:here(?:'s| is)\s+how|here are|some ways|steps|examples|options)\b[^.!?]{0,160}:\s*\d+[.)]?\s*$"""
+        ).containsMatchIn(cleaned)
+
+        return hasListMarkers || endsInDanglingItem || looksLikeBrokenLeadIn || sentenceCount == 0
+    }
+
+    private fun isBrokenAnswerModeResponse(cleaned: String, sentenceCount: Int): Boolean {
+        if (cleaned.isBlank()) return true
+
+        val endsInDanglingItem = Regex("""(?s).+:\s*\d+[.)]?\s*$""").containsMatchIn(cleaned) ||
+            Regex("""(?i)\b(and|or|because|with|for|using)\s*$""").containsMatchIn(cleaned)
+
+        return endsInDanglingItem || sentenceCount == 0
     }
 
     private fun buildTextRetryPrompt(
@@ -489,29 +544,43 @@ class AIInferenceService {
     }
 
     private fun textRetryInstructions(mode: ResponseMode): String = when (mode) {
-        ResponseMode.DIRECT -> "Keep it direct."
+        ResponseMode.DIRECT -> """
+            Keep it direct.
+            For simple fact questions, use 1 to 3 complete sentences.
+            For how/why/use/build questions, you may use up to about 3 to 6 complete sentences while staying direct.
+            Never use a numbered list, bullets, or steps.
+            If the product or platform is unclear, give the safest general answer and ask one short clarifying question instead of inventing details.
+            Never end with a dangling fragment like "1.", "Step 1", or "Here are some ways:".
+            Never answer with generic reset lines like "I'm ready to assist you" or "What's the first question?".
+        """.trimIndent()
         ResponseMode.ANSWER -> """
             Start with the answer, then add a brief explanation and one useful example.
             Use 3 to 5 complete sentences.
+            Never answer with generic reset lines like "I'm ready to assist you" or "What's the first question?".
         """.trimIndent()
         ResponseMode.EXPLAIN -> """
             Explain like a teacher, not like Direct mode.
             Write at least 4 complete sentences.
             Cover what it is, why it matters, where it is used, and one simple example or takeaway.
+            Never answer with generic reset lines like "I'm ready to assist you" or "What's the first question?".
         """.trimIndent()
         ResponseMode.NOTES -> """
             Use notes format only:
             title line, 4 to 6 bullet points starting with "- ", then "Summary: ...".
+            Never answer with generic reset lines like "I'm ready to assist you" or "What's the first question?".
         """.trimIndent()
         ResponseMode.DIRECTION -> """
             Use Step 1, Step 2, Step 3 format, then add Tips and Common Mistakes sections.
+            Never answer with generic reset lines like "I'm ready to assist you" or "What's the first question?".
         """.trimIndent()
         ResponseMode.CREATIVE -> """
             Write 4 to 6 sentences and include one memorable analogy plus why it matters.
+            Never answer with generic reset lines like "I'm ready to assist you" or "What's the first question?".
         """.trimIndent()
         ResponseMode.THEORY -> """
             Give a deeper explanation with at least 5 complete sentences.
             Cover the big picture, key concepts, and how they connect.
+            Never answer with generic reset lines like "I'm ready to assist you" or "What's the first question?".
         """.trimIndent()
     }
 
@@ -761,18 +830,20 @@ class AIInferenceService {
     }
 
     private fun buildTextGenerationOptions(
+        userQuery: String,
         mode: ResponseMode,
         customPrompt: String?
     ): LLMGenerationOptions {
         val isCompanion = isCompanionPrompt(customPrompt)
+        val complexityBoost = adaptiveQuestionTokenBoost(userQuery)
         val maxTokens = when (mode) {
-            ResponseMode.DIRECT -> if (isCompanion) 280 else 220
-            ResponseMode.ANSWER -> 360
-            ResponseMode.EXPLAIN -> 720
-            ResponseMode.NOTES -> 420
-            ResponseMode.DIRECTION -> 520
-            ResponseMode.CREATIVE -> 760
-            ResponseMode.THEORY -> 900
+            ResponseMode.DIRECT -> (if (isCompanion) 420 else 420) + complexityBoost
+            ResponseMode.ANSWER -> 520 + complexityBoost
+            ResponseMode.EXPLAIN -> 760 + complexityBoost
+            ResponseMode.NOTES -> 620 + complexityBoost
+            ResponseMode.DIRECTION -> 620 + complexityBoost
+            ResponseMode.CREATIVE -> 760 + complexityBoost
+            ResponseMode.THEORY -> 920 + complexityBoost
         }
         val temperature = when (mode) {
             ResponseMode.DIRECT -> if (isCompanion) 0.58f else 0.22f
@@ -789,11 +860,36 @@ class AIInferenceService {
         }
 
         return LLMGenerationOptions(
-            maxTokens = maxTokens,
+            maxTokens = maxTokens.coerceAtMost(1600),
             temperature = temperature,
             topP = topP,
             streamingEnabled = true
         )
+    }
+
+    private fun adaptiveQuestionTokenBoost(userQuery: String): Int {
+        val normalized = userQuery.lowercase(Locale.getDefault())
+        val wordCount = normalized.split(Regex("\\s+")).count { it.isNotBlank() }
+
+        var complexity = 0
+        if (wordCount >= 8) complexity += 1
+        if (wordCount >= 16) complexity += 1
+        if (wordCount >= 28) complexity += 1
+
+        val deepQuestionKeywords = listOf(
+            "how", "why", "use", "build", "create", "implement", "compare", "difference",
+            "workflow", "steps", "example", "integrate", "integration", "architecture",
+            "design", "debug", "fix", "best way", "explain"
+        )
+        if (deepQuestionKeywords.any { normalized.contains(it) }) {
+            complexity += 1
+        }
+
+        if (normalized.contains("?") && wordCount >= 10) {
+            complexity += 1
+        }
+
+        return complexity * 180
     }
 
     private fun buildCompanionRecoveryOptions(): LLMGenerationOptions =
@@ -1040,17 +1136,23 @@ class AIInferenceService {
     suspend fun generateReasoningSteps(userQuery: String, response: String): List<ReasoningStep> = 
         withContext(Dispatchers.IO) {
             val prompt = """
-Show the reasoning steps that led to this answer.
+Explain in simple user-facing steps how this answer was generated.
+Do not reveal hidden chain-of-thought. Give only a short, helpful breakdown.
+Focus on:
+- what the question was asking
+- the main idea or facts used
+- how the selected answer style shaped the reply
+- why the final answer matched the question
 
 Question: $userQuery
 Answer: $response
 
-Format as:
-STEP 1: [Title]
-[Description]
+Write 3 to 5 short steps in this exact format:
+STEP 1: [Short title]
+[1 to 2 short sentences]
 
-STEP 2: [Title]
-[Description]
+STEP 2: [Short title]
+[1 to 2 short sentences]
             """.trimIndent()
             
             val raw = RunAnywhere.chat(prompt)

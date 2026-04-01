@@ -48,6 +48,19 @@ data class TopicInsight(
     val matchedKeywords: List<String> = emptyList()
 )
 
+data class AnswerSourceDetails(
+    val question: String,
+    val answer: String,
+    val modeLabel: String,
+    val modelName: String,
+    val assistantLabel: String? = null,
+    val tokensUsed: Int = 0,
+    val promptTokens: Int = 0,
+    val responseTokens: Int = 0,
+    val responseTimeMs: Long = 0,
+    val timeToFirstTokenMs: Long? = null
+)
+
 private data class RelevantMemoryMatch(
     val text: String,
     val score: Double,
@@ -135,6 +148,12 @@ class AlgsochViewModel : ViewModel() {
     
     var reasoningSteps by mutableStateOf<List<ReasoningStep>>(emptyList())
         private set
+
+    var isLoadingReasoning by mutableStateOf(false)
+        private set
+
+    var sourceDetails by mutableStateOf<AnswerSourceDetails?>(null)
+        private set
     
     var showNotesDialog by mutableStateOf(false)
         private set
@@ -147,6 +166,7 @@ class AlgsochViewModel : ViewModel() {
     
     // Generation job for cancellation support
     private var generationJob: Job? = null
+    private val reasoningCache = mutableMapOf<String, List<ReasoningStep>>()
     
     // Chat history and persistence
     var chatSessions by mutableStateOf<List<ChatSession>>(emptyList())
@@ -449,17 +469,53 @@ class AlgsochViewModel : ViewModel() {
         autosaveChat()
     }
     
-    fun showReasoningFor(userQuery: String, response: String) {
+    fun showReasoningFor(
+        userQuery: String,
+        response: com.runanywhere.kotlin_starter_example.domain.models.StructuredResponse,
+        responseText: String,
+        assistantLabel: String? = null
+    ) {
+        sourceDetails = AnswerSourceDetails(
+            question = userQuery,
+            answer = responseText,
+            modeLabel = response.mode.displayName(),
+            modelName = response.modelName,
+            assistantLabel = assistantLabel,
+            tokensUsed = response.tokensUsed,
+            promptTokens = response.promptTokens,
+            responseTokens = response.responseTokens,
+            responseTimeMs = response.responseTimeMs,
+            timeToFirstTokenMs = response.timeToFirstTokenMs
+        )
+        showReasoningDialog = true
+
+        val cacheKey = "${normalizeText(userQuery)}::${normalizeText(responseText)}::${response.mode.name}"
+        val cached = reasoningCache[cacheKey]
+        if (cached != null) {
+            reasoningSteps = cached
+            isLoadingReasoning = false
+            return
+        }
+
+        reasoningSteps = emptyList()
+        isLoadingReasoning = true
+
         viewModelScope.launch {
             try {
-                reasoningSteps = aiService.generateReasoningSteps(userQuery, response)
-                showReasoningDialog = true
-            } catch (_: Exception) {}
+                val generatedSteps = aiService.generateReasoningSteps(userQuery, responseText)
+                reasoningCache[cacheKey] = generatedSteps
+                reasoningSteps = generatedSteps
+            } catch (_: Exception) {
+                reasoningSteps = emptyList()
+            } finally {
+                isLoadingReasoning = false
+            }
         }
     }
     
     fun dismissReasoningDialog() {
         showReasoningDialog = false
+        isLoadingReasoning = false
     }
     
     fun convertToNotes(response: String) {
@@ -605,31 +661,32 @@ class AlgsochViewModel : ViewModel() {
         currentQuery: String,
         activeMode: CustomMode? = selectedCustomMode
     ): List<Pair<String, String>> {
-        val historicalMessages = ensureHistoricalMessagesCacheLoaded()
-            .filter { it.text.isNotBlank() }
-        val currentFingerprints = messages.map(::messageFingerprint).toSet()
-        val previousMessages = historicalMessages.filterNot { messageFingerprint(it) in currentFingerprints }
-        val effectiveMode = activeMode?.let(::preferredResponseModeFor) ?: selectedMode
-
-        val recentConversation = messages
+        val currentSessionHistory = messages
             .dropLast(1)
-            .filter { it.text.isNotBlank() }
+            .filter { it.text.isNotBlank() && !it.isPending }
+
+        val recentConversation = currentSessionHistory
             .takeLast(12)
             .mapNotNull { message ->
                 when {
                     message.isUser -> "user" to message.text.trim().take(240)
-                    shouldIncludeAssistantHistory(message, effectiveMode, activeMode) ->
+                    shouldIncludeAssistantHistory(message, activeMode) ->
                         "assistant" to message.text.trim().take(240)
                     else -> null
                 }
             }
             .takeLast(8)
 
-        val profileMemory = if (CustomModeStore.isCompanionMode(activeMode)) {
-            buildCompanionProfileMemory(previousMessages)
-        } else {
-            buildLearnerProfileMemory(previousMessages)
+        if (!CustomModeStore.isCompanionMode(activeMode)) {
+            return recentConversation
         }
+
+        val historicalMessages = ensureHistoricalMessagesCacheLoaded()
+            .filter { it.text.isNotBlank() }
+        val currentFingerprints = messages.map(::messageFingerprint).toSet()
+        val previousMessages = historicalMessages.filterNot { messageFingerprint(it) in currentFingerprints }
+
+        val profileMemory = buildCompanionProfileMemory(previousMessages)
         val rememberedContext = findRelevantPastMessages(currentQuery, previousMessages)
 
         return buildList {
@@ -641,19 +698,15 @@ class AlgsochViewModel : ViewModel() {
 
     private fun shouldIncludeAssistantHistory(
         message: ChatMessage,
-        effectiveMode: ResponseMode,
         activeMode: CustomMode?
     ): Boolean {
-        if (message.isUser) return true
+        if (message.isUser || message.isPending) return false
 
         val currentAssistantLabel = activeMode?.name
-        val isSameAssistant = when {
+        return when {
             currentAssistantLabel != null -> message.assistantLabel == currentAssistantLabel
             else -> message.assistantLabel == null
         }
-        val isSameMode = message.structuredResponse?.mode == effectiveMode
-
-        return isSameAssistant && (isSameMode || message.structuredResponse == null)
     }
 
     private fun buildLearnerProfileMemory(previousMessages: List<ChatMessage>): String? {

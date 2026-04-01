@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -131,8 +133,14 @@ fun AlgsochScreen(
                                 val userMsg = viewModel.messages
                                     .takeWhile { it.id != message.id }
                                     .lastOrNull { it.isUser }
-                                if (userMsg != null) {
-                                    viewModel.showReasoningFor(userMsg.text, message.text)
+                                val structuredResponse = message.structuredResponse
+                                if (userMsg != null && structuredResponse != null) {
+                                    viewModel.showReasoningFor(
+                                        userQuery = userMsg.text,
+                                        response = structuredResponse,
+                                        responseText = structuredResponse.toDisplayText(),
+                                        assistantLabel = message.assistantLabel
+                                    )
                                 }
                             }
                         )
@@ -251,7 +259,9 @@ fun AlgsochScreen(
 
     if (viewModel.showReasoningDialog) {
         ReasoningStepsDialog(
+            sourceDetails = viewModel.sourceDetails,
             reasoningSteps = viewModel.reasoningSteps,
+            isLoading = viewModel.isLoadingReasoning,
             onDismiss = { viewModel.dismissReasoningDialog() }
         )
     }
@@ -764,6 +774,13 @@ private fun MessageBubble(
     ) {
         if (isUser) {
             Column(horizontalAlignment = Alignment.End) {
+                BubbleHeader(
+                    label = "You",
+                    timestamp = formatMessageTimestamp(message.timestamp),
+                    isUser = true
+                )
+                Spacer(Modifier.height(6.dp))
+
                 message.imageUri?.let { imageUri ->
                     Surface(
                         color = SurfaceSecondary,
@@ -791,47 +808,53 @@ private fun MessageBubble(
             }
         } else {
             // AI response
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth(0.92f)
-                    .border(2.dp, AccentBlue.copy(alpha = 0.5f), RoundedCornerShape(topStart = 4.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 20.dp)),
-                colors = CardDefaults.cardColors(containerColor = BackgroundDark),
-                shape = RoundedCornerShape(topStart = 4.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 20.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(20.dp)
-                ) {
-                    message.structuredResponse?.let { response ->
-                        val fullContent = response.toDisplayText().ifBlank {
-                            if (isMissingSavedReply) {
-                                "Older reply could not be restored from saved history."
-                            } else {
-                                message.text.ifBlank { "This reply has no visible text available." }
-                            }
-                        }
-                        SelectionContainer {
-                            Text(
-                                text = buildFormattedAssistantText(fullContent),
-                                color = if (isMissingSavedReply) TextMuted else Color.White,
-                                style = if (isMissingSavedReply) {
-                                    MaterialTheme.typography.bodySmall.copy(lineHeight = 20.sp)
-                                } else {
-                                    MaterialTheme.typography.bodyMedium.copy(
-                                        fontSize = 16.sp,
-                                        lineHeight = 24.sp
-                                    )
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 4.dp),
-                                softWrap = true
-                            )
-                        }
+            Column(horizontalAlignment = Alignment.Start) {
+                BubbleHeader(
+                    label = message.assistantLabel?.takeIf { it.isNotBlank() } ?: "Reply",
+                    timestamp = formatMessageTimestamp(message.timestamp),
+                    isUser = false
+                )
+                Spacer(Modifier.height(6.dp))
 
-                        // Metadata display below response
-                        if (response.tokensUsed > 0 || response.responseTimeMs > 0) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth(0.92f)
+                        .border(2.dp, AccentBlue.copy(alpha = 0.5f), RoundedCornerShape(topStart = 4.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 20.dp)),
+                    colors = CardDefaults.cardColors(containerColor = BackgroundDark),
+                    shape = RoundedCornerShape(topStart = 4.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 20.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp)
+                    ) {
+                        message.structuredResponse?.let { response ->
+                            val fullContent = response.toDisplayText().ifBlank {
+                                if (isMissingSavedReply) {
+                                    "Older reply could not be restored from saved history."
+                                } else {
+                                    message.text.ifBlank { "This reply has no visible text available." }
+                                }
+                            }
+                            SelectionContainer {
+                                Text(
+                                    text = buildFormattedAssistantText(fullContent),
+                                    color = if (isMissingSavedReply) TextMuted else Color.White,
+                                    style = if (isMissingSavedReply) {
+                                        MaterialTheme.typography.bodySmall.copy(lineHeight = 20.sp)
+                                    } else {
+                                        MaterialTheme.typography.bodyMedium.copy(
+                                            fontSize = 16.sp,
+                                            lineHeight = 24.sp
+                                        )
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 4.dp),
+                                    softWrap = true
+                                )
+                            }
+
                             Spacer(Modifier.height(16.dp))
                             HorizontalDivider(color = AccentBlue.copy(alpha = 0.2f), thickness = 1.dp)
                             Spacer(Modifier.height(10.dp))
@@ -852,6 +875,17 @@ private fun MessageBubble(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    TinyMetaChip(
+                                        label = response.mode.displayName(),
+                                        textColor = AccentOrange,
+                                        borderColor = AccentOrange.copy(alpha = 0.28f)
+                                    )
+                                    TinyMetaChip(
+                                        label = "Source",
+                                        textColor = AccentBlue,
+                                        borderColor = AccentBlue.copy(alpha = 0.28f),
+                                        onClick = onSeeHow
+                                    )
                                     if (response.tokensUsed > 0) {
                                         TinyMetaChip("${response.tokensUsed} tokens")
                                     }
@@ -860,39 +894,27 @@ private fun MessageBubble(
                                     }
                                 }
                             }
-                        }
-                    } ?: run {
-                        // For plain text responses
-                        val plainText = message.text.ifBlank {
-                            "Older reply could not be restored from saved history."
-                        }
-                        val displayText = if (isMissingSavedReply) {
-                            "Older reply could not be restored from saved history."
-                        } else {
-                            plainText
-                        }
-                        val textColor = if (isMissingSavedReply || message.text.isBlank()) TextMuted else Color.White
-                        val textStyle = if (isMissingSavedReply) {
-                            MaterialTheme.typography.bodySmall.copy(lineHeight = 20.sp)
-                        } else {
-                            MaterialTheme.typography.bodyMedium.copy(
-                                fontSize = 16.sp,
-                                lineHeight = 24.sp
-                            )
-                        }
+                        } ?: run {
+                            // For plain text responses
+                            val plainText = message.text.ifBlank {
+                                "Older reply could not be restored from saved history."
+                            }
+                            val displayText = if (isMissingSavedReply) {
+                                "Older reply could not be restored from saved history."
+                            } else {
+                                plainText
+                            }
+                            val textColor = if (isMissingSavedReply || message.text.isBlank()) TextMuted else Color.White
+                            val textStyle = if (isMissingSavedReply) {
+                                MaterialTheme.typography.bodySmall.copy(lineHeight = 20.sp)
+                            } else {
+                                MaterialTheme.typography.bodyMedium.copy(
+                                    fontSize = 16.sp,
+                                    lineHeight = 24.sp
+                                )
+                            }
 
-                        if (message.isPending) {
-                            Text(
-                                text = buildFormattedAssistantText(displayText),
-                                color = textColor,
-                                style = textStyle,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 4.dp),
-                                softWrap = true
-                            )
-                        } else {
-                            SelectionContainer {
+                            if (message.isPending) {
                                 Text(
                                     text = buildFormattedAssistantText(displayText),
                                     color = textColor,
@@ -902,6 +924,31 @@ private fun MessageBubble(
                                         .padding(horizontal = 4.dp),
                                     softWrap = true
                                 )
+                                Spacer(Modifier.height(16.dp))
+                                HorizontalDivider(color = AccentBlue.copy(alpha = 0.2f), thickness = 1.dp)
+                                Spacer(Modifier.height(10.dp))
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    message.assistantLabel?.takeIf { it.isNotBlank() }?.let { assistantName ->
+                                        TinyMetaChip(assistantName)
+                                    }
+                                    TinyMetaChip("Generating...")
+                                }
+                            } else {
+                                SelectionContainer {
+                                    Text(
+                                        text = buildFormattedAssistantText(displayText),
+                                        color = textColor,
+                                        style = textStyle,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 4.dp),
+                                        softWrap = true
+                                    )
+                                }
                             }
                         }
                     }
@@ -927,6 +974,53 @@ private fun MessageBubble(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun BubbleHeader(
+    label: String,
+    timestamp: String,
+    isUser: Boolean
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(0.92f),
+        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (!isUser) {
+            SenderBadge(label = label, isUser = false)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = timestamp,
+                color = TextMuted,
+                style = MaterialTheme.typography.labelSmall
+            )
+        } else {
+            Text(
+                text = timestamp,
+                color = TextMuted,
+                style = MaterialTheme.typography.labelSmall
+            )
+            Spacer(Modifier.width(8.dp))
+            SenderBadge(label = label, isUser = true)
+        }
+    }
+}
+
+@Composable
+private fun SenderBadge(label: String, isUser: Boolean) {
+    Surface(
+        color = if (isUser) AccentBlue.copy(alpha = 0.16f) else SurfaceSecondary,
+        shape = RoundedCornerShape(999.dp)
+    ) {
+        Text(
+            text = label,
+            color = if (isUser) AccentBlue else Color.White.copy(alpha = 0.9f),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+        )
     }
 }
 
@@ -986,17 +1080,24 @@ private fun AnnotatedString.Builder.appendBoldSegment(text: String) {
 }
 
 @Composable
-private fun TinyMetaChip(label: String) {
+private fun TinyMetaChip(
+    label: String,
+    textColor: Color = TextMuted,
+    borderColor: Color = Color.White.copy(alpha = 0.12f),
+    onClick: (() -> Unit)? = null
+) {
     Surface(
         color = BackgroundDark,
         shape = RoundedCornerShape(999.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
+        border = androidx.compose.foundation.BorderStroke(1.dp, borderColor)
     ) {
         Text(
             text = label,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            modifier = Modifier
+                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+                .padding(horizontal = 10.dp, vertical = 4.dp),
             style = MaterialTheme.typography.labelSmall,
-            color = TextMuted
+            color = textColor
         )
     }
 }
@@ -1156,6 +1257,7 @@ private fun PremiumHistorySheet(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun HistoryItem(session: ChatSession, isActive: Boolean, onClick: () -> Unit, onDelete: () -> Unit) {
     Surface(
@@ -1233,9 +1335,25 @@ private fun HistoryItem(session: ChatSession, isActive: Boolean, onClick: () -> 
                 }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                HistoryMetaChip("${session.questionCount} questions")
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                HistoryMetaChip("${session.questionCount} ${if (session.questionCount == 1) "question" else "questions"}")
                 HistoryMetaChip("${session.messageCount} messages")
+                session.modeLabel?.let { modeLabel ->
+                    HistoryMetaChip(
+                        label = modeLabel,
+                        textColor = AccentOrange,
+                        borderColor = AccentOrange.copy(alpha = 0.28f)
+                    )
+                }
+                session.modelName?.let { modelName ->
+                    HistoryMetaChip(modelName)
+                }
+                if (session.responseTimeMs > 0) {
+                    HistoryMetaChip(formatResponseTime(session.responseTimeMs))
+                }
             }
         }
     }
@@ -1288,15 +1406,19 @@ private fun HistoryOverviewChip(label: String, value: String, modifier: Modifier
 }
 
 @Composable
-private fun HistoryMetaChip(label: String) {
+private fun HistoryMetaChip(
+    label: String,
+    textColor: Color = TextMuted,
+    borderColor: Color = Color.White.copy(alpha = 0.08f)
+) {
     Surface(
         color = BackgroundDark,
         shape = RoundedCornerShape(999.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+        border = androidx.compose.foundation.BorderStroke(1.dp, borderColor)
     ) {
         Text(
             text = label,
-            color = TextMuted,
+            color = textColor,
             style = MaterialTheme.typography.labelSmall,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
         )
@@ -1305,6 +1427,9 @@ private fun HistoryMetaChip(label: String) {
 
 private fun formatHistoryTimestamp(timestamp: Long): String =
     SimpleDateFormat("d MMM, h:mm a", Locale.getDefault()).format(Date(timestamp))
+
+private fun formatMessageTimestamp(timestamp: Long): String =
+    SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(timestamp))
 
 @Composable
 private fun ModernCustomModeDialog(
@@ -2400,34 +2525,155 @@ private fun saveCapturedBitmapToCache(context: Context, bitmap: Bitmap): Uri? {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ReasoningStepsDialog(
+    sourceDetails: AnswerSourceDetails?,
     reasoningSteps: List<ReasoningStep>,
+    isLoading: Boolean,
     onDismiss: () -> Unit
 ) {
+    val pagerState = rememberPagerState(pageCount = { 2 })
+    val scope = rememberCoroutineScope()
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = BackgroundDark,
         dragHandle = { BottomSheetDefaults.DragHandle(color = TextMuted) }
     ) {
         Column(modifier = Modifier.padding(24.dp).navigationBarsPadding().fillMaxHeight(0.85f)) {
-            Text("How the model reasoned through this", style = MaterialTheme.typography.headlineSmall, color = Color.White, fontWeight = FontWeight.Bold)
+            Text("How This Answer Was Generated", style = MaterialTheme.typography.headlineSmall, color = Color.White, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Swipe left or right between overview and steps. The overview opens instantly while the steps load in the background.",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary
+            )
             Spacer(Modifier.height(16.dp))
-            
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(reasoningSteps) { step ->
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = SurfaceSecondary,
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text("Step ${step.stepNumber}: ${step.title}", 
-                                style = MaterialTheme.typography.labelLarge, 
-                                color = AccentBlue, 
-                                fontWeight = FontWeight.Bold)
-                            Spacer(Modifier.height(8.dp))
-                            Text(step.description, 
-                                style = MaterialTheme.typography.bodySmall, 
-                                color = TextSecondary)
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                TinyMetaChip(
+                    label = "Overview",
+                    textColor = if (pagerState.currentPage == 0) AccentBlue else TextMuted,
+                    borderColor = if (pagerState.currentPage == 0) AccentBlue.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.12f),
+                    onClick = { scope.launch { pagerState.animateScrollToPage(0) } }
+                )
+                TinyMetaChip(
+                    label = "Steps",
+                    textColor = if (pagerState.currentPage == 1) AccentBlue else TextMuted,
+                    borderColor = if (pagerState.currentPage == 1) AccentBlue.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.12f),
+                    onClick = { scope.launch { pagerState.animateScrollToPage(1) } }
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.weight(1f)
+            ) { page ->
+                when (page) {
+                    0 -> {
+                        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            item {
+                                sourceDetails?.let { source ->
+                                    SourceInfoCard(
+                                        title = "Question",
+                                        content = source.question,
+                                        accent = AccentBlue
+                                    )
+                                    SourceInfoCard(
+                                        title = "Answer Shape",
+                                        content = "Mode: ${source.modeLabel}${source.assistantLabel?.let { " · Assistant: $it" }.orEmpty()}",
+                                        accent = AccentOrange
+                                    )
+                                    SourceInfoCard(
+                                        title = "Generation Info",
+                                        content = buildString {
+                                            append("Model: ${displayModelName(source.modelName)}")
+                                            if (source.tokensUsed > 0) append("\nTokens: ${source.tokensUsed}")
+                                            if (source.promptTokens > 0 || source.responseTokens > 0) {
+                                                append("\nPrompt/Response: ${source.promptTokens}/${source.responseTokens}")
+                                            }
+                                            if (source.responseTimeMs > 0) append("\nTime: ${formatResponseTime(source.responseTimeMs)}")
+                                            source.timeToFirstTokenMs?.takeIf { it > 0 }?.let {
+                                                append("\nFirst token: ${formatResponseTime(it)}")
+                                            }
+                                        },
+                                        accent = AccentCyan
+                                    )
+                                    SourceInfoCard(
+                                        title = "Final Answer",
+                                        content = source.answer,
+                                        accent = AccentGreen
+                                    )
+                                } ?: SourceInfoCard(
+                                    title = "Source",
+                                    content = "No source data is available for this reply yet.",
+                                    accent = AccentBlue
+                                )
+                            }
+                        }
+                    }
+
+                    else -> {
+                        when {
+                            isLoading -> {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        CircularProgressIndicator(color = AccentBlue)
+                                        Spacer(Modifier.height(12.dp))
+                                        Text(
+                                            "Building the step-by-step source view...",
+                                            color = TextSecondary,
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                }
+                            }
+
+                            reasoningSteps.isEmpty() -> {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        "No step-by-step source details are available for this reply.",
+                                        color = TextSecondary,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                            }
+
+                            else -> {
+                                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    items(reasoningSteps) { step ->
+                                        Surface(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            color = SurfaceSecondary,
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Column(modifier = Modifier.padding(16.dp)) {
+                                                Text(
+                                                    "Step ${step.stepNumber}: ${step.title}",
+                                                    style = MaterialTheme.typography.labelLarge,
+                                                    color = AccentBlue,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                Spacer(Modifier.height(8.dp))
+                                                Text(
+                                                    step.description,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = TextSecondary
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -2441,6 +2687,34 @@ private fun ReasoningStepsDialog(
             ) {
                 Text("Got it!")
             }
+        }
+    }
+}
+
+@Composable
+private fun SourceInfoCard(
+    title: String,
+    content: String,
+    accent: Color
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = SurfaceSecondary,
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelLarge,
+                color = accent,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = content,
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary
+            )
         }
     }
 }

@@ -2,6 +2,7 @@ package com.runanywhere.kotlin_starter_example.domain.ai
 
 import com.runanywhere.kotlin_starter_example.data.models.enums.Language
 import com.runanywhere.kotlin_starter_example.data.models.enums.ResponseMode
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -24,6 +25,42 @@ class ResponseParserTest {
 
         assertFalse(parsed.directAnswer.contains("huge ecosystem"))
         assertTrue(parsed.quickExplanation.isBlank())
+    }
+
+    @Test
+    fun directMode_removesBrokenNumberedListLeadIn() {
+        val rawResponse = """
+            Python is a popular programming language used in various applications, including CRM products. Here are some ways to use Python in a CRM product: 1.
+        """.trimIndent()
+
+        val parsed = parser.parse(
+            rawResponse = rawResponse,
+            mode = ResponseMode.DIRECT,
+            language = Language.ENGLISH
+        )
+
+        assertEquals(
+            "Python is a popular programming language used in various applications, including CRM products.",
+            parsed.directAnswer
+        )
+    }
+
+    @Test
+    fun directMode_removesBrokenHeresHowSentence() {
+        val rawResponse = """
+            Python is a popular language used in many areas of CRM, including data analysis, reporting, and automation. Here's how you can use Python in a CRM product: 1.
+        """.trimIndent()
+
+        val parsed = parser.parse(
+            rawResponse = rawResponse,
+            mode = ResponseMode.DIRECT,
+            language = Language.ENGLISH
+        )
+
+        assertEquals(
+            "Python is a popular language used in many areas of CRM, including data analysis, reporting, and automation.",
+            parsed.directAnswer
+        )
     }
 
     @Test

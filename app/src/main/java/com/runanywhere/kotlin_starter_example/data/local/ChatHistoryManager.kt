@@ -2,11 +2,14 @@ package com.runanywhere.kotlin_starter_example.data.local
 
 import android.content.Context
 import com.runanywhere.kotlin_starter_example.data.models.enums.Language
+import com.runanywhere.kotlin_starter_example.data.models.enums.FeedbackType
 import com.runanywhere.kotlin_starter_example.data.models.enums.ResponseMode
 import com.runanywhere.kotlin_starter_example.domain.models.StructuredResponse
 import com.runanywhere.kotlin_starter_example.ui.screens.algsoch.ChatMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -39,7 +42,7 @@ class ChatHistoryManager(private val context: Context) {
                 ?.takeIf { it.isNotBlank() }
                 ?.let(::File)
                 ?: File(chatDir, "${sanitizeSessionName(sessionName)}.json")
-            val jsonContent = messagesToJson(messages)
+            val jsonContent = ChatHistoryJsonCodec.messagesToJson(messages)
             chatFile.writeText(jsonContent)
             chatFile.absolutePath
         }
@@ -49,18 +52,26 @@ class ChatHistoryManager(private val context: Context) {
      */
     suspend fun loadAllChatSessions(): List<ChatSession> = withContext(Dispatchers.IO) {
         listCanonicalSessionFiles().map { file ->
-            val sessionMessages = jsonToMessages(file.readText())
+            val sessionMessages = ChatHistoryJsonCodec.jsonToMessages(file.readText())
+            val latestAssistantResponse = sessionMessages
+                .asReversed()
+                .firstNotNullOfOrNull { message ->
+                    if (!message.isUser) message.structuredResponse else null
+                }
             ChatSession(
                 name = canonicalSessionName(file.nameWithoutExtension),
                 path = file.absolutePath,
                 lastModified = file.lastModified(),
                 messageCount = sessionMessages.size,
-                questionCount = sessionMessages.count { it.isUser },
+                questionCount = sessionMessages.count { it.isUser && it.text.isNotBlank() },
                 title = deriveSessionTitle(sessionMessages, file.nameWithoutExtension, file.lastModified()),
                 preview = deriveAssistantPreview(sessionMessages),
                 userPreview = deriveUserPreview(sessionMessages),
                 assistantPreview = deriveAssistantPreview(sessionMessages),
-                assistantName = deriveAssistantName(sessionMessages)
+                assistantName = deriveAssistantName(sessionMessages),
+                modeLabel = latestAssistantResponse?.mode?.displayName(),
+                modelName = latestAssistantResponse?.modelName?.takeIf { it.isNotBlank() },
+                responseTimeMs = latestAssistantResponse?.responseTimeMs ?: 0L
             )
         }.sortedByDescending { it.lastModified }
     }
@@ -74,9 +85,9 @@ class ChatHistoryManager(private val context: Context) {
         var totalQuestions = 0
 
         files.forEach { file ->
-            val msgs = jsonToMessages(file.readText())
+            val msgs = ChatHistoryJsonCodec.jsonToMessages(file.readText())
             totalMessages += msgs.size
-            totalQuestions += msgs.count { it.isUser }
+            totalQuestions += msgs.count { it.isUser && it.text.isNotBlank() }
         }
 
         GlobalChatStats(
@@ -95,7 +106,7 @@ class ChatHistoryManager(private val context: Context) {
         
         files.forEach { file ->
             try {
-                val messages = jsonToMessages(file.readText())
+                val messages = ChatHistoryJsonCodec.jsonToMessages(file.readText())
                 allMessages.addAll(messages)
             } catch (e: Exception) {
                 // Skip corrupted files
@@ -112,7 +123,7 @@ class ChatHistoryManager(private val context: Context) {
         withContext(Dispatchers.IO) {
             val file = File(sessionPath)
             if (file.exists()) {
-                jsonToMessages(file.readText())
+                ChatHistoryJsonCodec.jsonToMessages(file.readText())
             } else {
                 emptyList()
             }
@@ -142,7 +153,7 @@ class ChatHistoryManager(private val context: Context) {
     suspend fun exportChatAsJSON(messages: List<ChatMessage>): String = 
         withContext(Dispatchers.IO) {
             val jsonFile = File(chatDir, "chat_export_${System.currentTimeMillis()}.json")
-            val jsonContent = messagesToJson(messages)
+            val jsonContent = ChatHistoryJsonCodec.messagesToJson(messages)
             jsonFile.writeText(jsonContent)
             jsonFile.absolutePath
         }
@@ -209,166 +220,6 @@ class ChatHistoryManager(private val context: Context) {
             .trim()
             .ifBlank { "chat_${System.currentTimeMillis()}" }
             .replace(Regex("[^A-Za-z0-9._-]"), "_")
-    
-    private fun messagesToJson(messages: List<ChatMessage>): String {
-        return buildString {
-            append("[\n")
-            messages.forEachIndexed { index, msg ->
-                val storedText = messageTextForStorage(msg)
-                append("  {\n")
-                append("    \"timestamp\": ${msg.timestamp},\n")
-                append("    \"isUser\": ${msg.isUser},\n")
-                append("    \"text\": \"${escapeJsonString(storedText)}\",\n")
-                append("    \"assistantLabel\": ${msg.assistantLabel?.let { "\"${escapeJsonString(it)}\"" } ?: "null"},\n")
-                appendStructuredResponseJson(msg.structuredResponse)
-                append("    \"feedbackType\": ${msg.feedbackType?.name?.let { "\"$it\"" } ?: "null"}\n")
-                append("  }")
-                if (index < messages.size - 1) append(",")
-                append("\n")
-            }
-            append("]")
-        }
-    }
-    
-    private fun jsonToMessages(json: String): List<ChatMessage> {
-        return try {
-            val messages = mutableListOf<ChatMessage>()
-            val cleaned = json.trim()
-            if (cleaned.startsWith("[") && cleaned.endsWith("]")) {
-                val content = cleaned.substring(1, cleaned.length - 1)
-                val objectStrings = content.split("},\n  {").map { 
-                    it.trim().trimStart('{').trimEnd('}').trim()
-                }
-                
-                objectStrings.forEach { objStr ->
-                    if (objStr.isNotBlank()) {
-                        val timestamp = extractJsonValue(objStr, "timestamp").toLongOrNull() ?: System.currentTimeMillis()
-                        val isUser = extractJsonValue(objStr, "isUser").toBoolean()
-                        val text = extractJsonValue(objStr, "text")
-                        val assistantLabel = extractJsonValue(objStr, "assistantLabel").takeUnless { it == "null" || it.isBlank() }
-                        val structuredResponse = parseStructuredResponse(objStr, text)
-                        val restoredText = text.ifBlank {
-                            if (isUser) "" else "[Older saved reply unavailable]"
-                        }
-                        
-                        messages.add(
-                            ChatMessage(
-                                id = timestamp,
-                                text = restoredText,
-                                isUser = isUser,
-                                timestamp = timestamp,
-                                assistantLabel = assistantLabel,
-                                structuredResponse = structuredResponse
-                            )
-                        )
-                    }
-                }
-            }
-            messages
-        } catch (e: Exception) {
-            emptyList()
-        }
-    }
-    
-    private fun extractJsonValue(json: String, key: String): String {
-        val keyPattern = """"$key"\s*:\s*"""".toRegex()
-        val keyMatch = keyPattern.find(json) ?: return ""
-
-        val startIndex = keyMatch.range.last + 1
-        if (startIndex >= json.length) return ""
-
-        val valueString = json.substring(startIndex).trimStart()
-        if (valueString.startsWith("\"")) {
-            var endIndex = 1
-            var isEscaped = false
-            while (endIndex < valueString.length) {
-                val char = valueString[endIndex]
-                if (isEscaped) {
-                    isEscaped = false
-                } else if (char == '\\') {
-                    isEscaped = true
-                } else if (char == '"') {
-                    // Found the closing quote
-                    val rawValue = valueString.substring(1, endIndex)
-                    // Unescape JSON string
-                    return rawValue
-                        .replace("\\\"", "\"")
-                        .replace("\\\\", "\\")
-                        .replace("\\n", "\n")
-                        .replace("\\r", "\r")
-                        .replace("\\t", "\t")
-                }
-                endIndex++
-            }
-        }
-
-        return when {
-            valueString.startsWith("true") -> "true"
-            valueString.startsWith("false") -> "false"
-            valueString.startsWith("null") -> "null"
-            else -> valueString
-                .takeWhile { it != ',' && it != '\n' && it != '\r' && it != '}' }
-                .trim()
-        }
-    }
-
-    private fun messageTextForStorage(message: ChatMessage): String =
-        message.text.ifBlank { message.structuredResponse?.toDisplayText().orEmpty() }
-
-    private fun StringBuilder.appendStructuredResponseJson(structuredResponse: StructuredResponse?) {
-        if (structuredResponse == null) return
-
-        append("    \"mode\": \"${structuredResponse.mode.name}\",\n")
-        append("    \"language\": \"${structuredResponse.language.name}\",\n")
-        append("    \"directAnswer\": \"${escapeJsonString(structuredResponse.directAnswer)}\",\n")
-        append("    \"quickExplanation\": \"${escapeJsonString(structuredResponse.quickExplanation)}\",\n")
-        append("    \"deepExplanation\": ${structuredResponse.deepExplanation?.let { "\"${escapeJsonString(it)}\"" } ?: "null"},\n")
-        append("    \"modelName\": \"${escapeJsonString(structuredResponse.modelName)}\",\n")
-        append("    \"tokensUsed\": ${structuredResponse.tokensUsed},\n")
-        append("    \"promptTokens\": ${structuredResponse.promptTokens},\n")
-        append("    \"responseTokens\": ${structuredResponse.responseTokens},\n")
-        append("    \"responseTimeMs\": ${structuredResponse.responseTimeMs},\n")
-        append("    \"timeToFirstTokenMs\": ${structuredResponse.timeToFirstTokenMs ?: "null"},\n")
-    }
-
-    private fun parseStructuredResponse(jsonObject: String, fallbackText: String): StructuredResponse? {
-        val modeRaw = extractJsonValue(jsonObject, "mode").takeUnless { it == "null" || it.isBlank() } ?: return null
-        val languageRaw = extractJsonValue(jsonObject, "language").takeUnless { it == "null" || it.isBlank() } ?: return null
-
-        val mode = runCatching { ResponseMode.valueOf(modeRaw) }.getOrNull() ?: return null
-        val language = runCatching { Language.valueOf(languageRaw) }.getOrNull() ?: Language.ENGLISH
-        val directAnswer = extractJsonValue(jsonObject, "directAnswer").ifBlank { fallbackText }
-        val quickExplanation = extractJsonValue(jsonObject, "quickExplanation").takeUnless { it == "null" } ?: ""
-        val deepExplanation = extractJsonValue(jsonObject, "deepExplanation").takeUnless { it == "null" || it.isBlank() }
-        val modelName = extractJsonValue(jsonObject, "modelName").takeUnless { it == "null" || it.isBlank() } ?: "SmolLM2-360M"
-        val tokensUsed = extractJsonValue(jsonObject, "tokensUsed").toIntOrNull() ?: 0
-        val promptTokens = extractJsonValue(jsonObject, "promptTokens").toIntOrNull() ?: 0
-        val responseTokens = extractJsonValue(jsonObject, "responseTokens").toIntOrNull() ?: 0
-        val responseTimeMs = extractJsonValue(jsonObject, "responseTimeMs").toLongOrNull() ?: 0L
-        val timeToFirstTokenMs = extractJsonValue(jsonObject, "timeToFirstTokenMs").toLongOrNull()
-
-        return StructuredResponse(
-            directAnswer = directAnswer,
-            quickExplanation = quickExplanation,
-            deepExplanation = deepExplanation,
-            mode = mode,
-            language = language,
-            modelName = modelName,
-            tokensUsed = tokensUsed,
-            promptTokens = promptTokens,
-            responseTokens = responseTokens,
-            responseTimeMs = responseTimeMs,
-            timeToFirstTokenMs = timeToFirstTokenMs
-        )
-    }
-
-    private fun escapeJsonString(text: String): String =
-        text
-            .replace("\\", "\\\\")
-            .replace("\"", "\\\"")
-            .replace("\n", "\\n")
-            .replace("\r", "\\r")
-            .replace("\t", "\\t")
 
     private fun deriveSessionTitle(
         messages: List<ChatMessage>,
@@ -452,7 +303,10 @@ data class ChatSession(
     val preview: String = "",
     val userPreview: String = "",
     val assistantPreview: String = "",
-    val assistantName: String? = null
+    val assistantName: String? = null,
+    val modeLabel: String? = null,
+    val modelName: String? = null,
+    val responseTimeMs: Long = 0L
 )
 
 data class GlobalChatStats(
@@ -460,3 +314,102 @@ data class GlobalChatStats(
     val totalMessages: Int,
     val totalQuestions: Int
 )
+
+internal object ChatHistoryJsonCodec {
+
+    fun messagesToJson(messages: List<ChatMessage>): String {
+        val array = JSONArray()
+        messages.forEach { message ->
+            array.put(
+                JSONObject().apply {
+                    put("timestamp", message.timestamp)
+                    put("isUser", message.isUser)
+                    put("text", messageTextForStorage(message))
+                    put("assistantLabel", message.assistantLabel ?: JSONObject.NULL)
+                    put("feedbackType", message.feedbackType?.name ?: JSONObject.NULL)
+                    message.structuredResponse?.let { response ->
+                        put("mode", response.mode.name)
+                        put("language", response.language.name)
+                        put("directAnswer", response.directAnswer)
+                        put("quickExplanation", response.quickExplanation)
+                        put("deepExplanation", response.deepExplanation ?: JSONObject.NULL)
+                        put("modelName", response.modelName)
+                        put("tokensUsed", response.tokensUsed)
+                        put("promptTokens", response.promptTokens)
+                        put("responseTokens", response.responseTokens)
+                        put("responseTimeMs", response.responseTimeMs)
+                        put("timeToFirstTokenMs", response.timeToFirstTokenMs ?: JSONObject.NULL)
+                    }
+                }
+            )
+        }
+        return array.toString(2)
+    }
+
+    fun jsonToMessages(json: String): List<ChatMessage> = runCatching {
+        val cleaned = json.trim()
+        if (cleaned.isBlank()) {
+            emptyList()
+        } else {
+            val jsonArray = JSONArray(cleaned)
+            buildList {
+                for (index in 0 until jsonArray.length()) {
+                    val jsonObject = jsonArray.optJSONObject(index) ?: continue
+                    val timestamp = jsonObject.optLong("timestamp", System.currentTimeMillis())
+                    val isUser = jsonObject.optBoolean("isUser", false)
+                    val text = jsonObject.optString("text")
+                    val structuredResponse = parseStructuredResponse(jsonObject, text)
+                    val restoredText = text.ifBlank {
+                        if (isUser) "" else "[Older saved reply unavailable]"
+                    }
+
+                    add(
+                        ChatMessage(
+                            id = timestamp,
+                            text = restoredText,
+                            isUser = isUser,
+                            timestamp = timestamp,
+                            feedbackType = parseFeedbackType(jsonObject.optNullableString("feedbackType")),
+                            assistantLabel = jsonObject.optNullableString("assistantLabel"),
+                            structuredResponse = structuredResponse
+                        )
+                    )
+                }
+            }
+        }
+    }.getOrElse { emptyList() }
+
+    private fun parseStructuredResponse(jsonObject: JSONObject, fallbackText: String): StructuredResponse? {
+        val modeRaw = jsonObject.optNullableString("mode") ?: return null
+        val languageRaw = jsonObject.optNullableString("language") ?: return null
+
+        val mode = runCatching { ResponseMode.valueOf(modeRaw) }.getOrNull() ?: return null
+        val language = runCatching { Language.valueOf(languageRaw) }.getOrNull() ?: Language.ENGLISH
+
+        return StructuredResponse(
+            directAnswer = jsonObject.optString("directAnswer").ifBlank { fallbackText },
+            quickExplanation = jsonObject.optString("quickExplanation"),
+            deepExplanation = jsonObject.optNullableString("deepExplanation"),
+            mode = mode,
+            language = language,
+            modelName = jsonObject.optNullableString("modelName") ?: "SmolLM2-360M",
+            tokensUsed = jsonObject.optInt("tokensUsed", 0),
+            promptTokens = jsonObject.optInt("promptTokens", 0),
+            responseTokens = jsonObject.optInt("responseTokens", 0),
+            responseTimeMs = jsonObject.optLong("responseTimeMs", 0L),
+            timeToFirstTokenMs = jsonObject.optNullableLong("timeToFirstTokenMs")
+        )
+    }
+
+    private fun messageTextForStorage(message: ChatMessage): String =
+        message.text.ifBlank { message.structuredResponse?.toDisplayText().orEmpty() }
+
+    private fun JSONObject.optNullableString(key: String): String? =
+        if (isNull(key)) null else optString(key).takeIf { it.isNotBlank() }
+
+    private fun JSONObject.optNullableLong(key: String): Long? =
+        if (isNull(key)) null else optLong(key)
+
+    private fun parseFeedbackType(rawValue: String?): FeedbackType? =
+        rawValue?.let { value -> runCatching { FeedbackType.valueOf(value) }.getOrNull() }
+}
