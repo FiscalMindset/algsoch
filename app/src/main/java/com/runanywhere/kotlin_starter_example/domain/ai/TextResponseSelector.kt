@@ -15,7 +15,7 @@ internal object TextResponseSelector {
     ): String {
         val firstScore = score(mode, userQuery, firstAttempt)
         val retryScore = score(mode, userQuery, retryAttempt)
-        return if (retryScore >= firstScore) retryAttempt else firstAttempt
+        return if (retryScore > firstScore) retryAttempt else firstAttempt
     }
 
     fun score(

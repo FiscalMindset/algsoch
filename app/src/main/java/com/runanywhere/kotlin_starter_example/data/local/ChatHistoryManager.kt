@@ -1,9 +1,10 @@
 package com.runanywhere.kotlin_starter_example.data.local
 
 import android.content.Context
-import com.runanywhere.kotlin_starter_example.data.models.enums.Language
 import com.runanywhere.kotlin_starter_example.data.models.enums.FeedbackType
+import com.runanywhere.kotlin_starter_example.data.models.enums.Language
 import com.runanywhere.kotlin_starter_example.data.models.enums.ResponseMode
+import com.runanywhere.kotlin_starter_example.domain.models.GenerationTraceEntry
 import com.runanywhere.kotlin_starter_example.domain.models.StructuredResponse
 import com.runanywhere.kotlin_starter_example.ui.screens.algsoch.ChatMessage
 import kotlinx.coroutines.Dispatchers
@@ -339,6 +340,22 @@ internal object ChatHistoryJsonCodec {
                         put("responseTokens", response.responseTokens)
                         put("responseTimeMs", response.responseTimeMs)
                         put("timeToFirstTokenMs", response.timeToFirstTokenMs ?: JSONObject.NULL)
+                        put(
+                            "generationTrace",
+                            JSONArray().apply {
+                                response.generationTrace.forEach { trace ->
+                                    put(
+                                        JSONObject().apply {
+                                            put("label", trace.label)
+                                            put("text", trace.text)
+                                            put("reason", trace.reason ?: JSONObject.NULL)
+                                            put("wasStreamed", trace.wasStreamed)
+                                            put("wasSelected", trace.wasSelected)
+                                        }
+                                    )
+                                }
+                            }
+                        )
                     }
                 }
             )
@@ -397,7 +414,8 @@ internal object ChatHistoryJsonCodec {
             promptTokens = jsonObject.optInt("promptTokens", 0),
             responseTokens = jsonObject.optInt("responseTokens", 0),
             responseTimeMs = jsonObject.optLong("responseTimeMs", 0L),
-            timeToFirstTokenMs = jsonObject.optNullableLong("timeToFirstTokenMs")
+            timeToFirstTokenMs = jsonObject.optNullableLong("timeToFirstTokenMs"),
+            generationTrace = jsonObject.optJSONArray("generationTrace")?.toGenerationTraceEntries().orEmpty()
         )
     }
 
@@ -412,4 +430,20 @@ internal object ChatHistoryJsonCodec {
 
     private fun parseFeedbackType(rawValue: String?): FeedbackType? =
         rawValue?.let { value -> runCatching { FeedbackType.valueOf(value) }.getOrNull() }
+
+    private fun JSONArray.toGenerationTraceEntries(): List<GenerationTraceEntry> =
+        buildList {
+            for (index in 0 until length()) {
+                val entry = optJSONObject(index) ?: continue
+                add(
+                    GenerationTraceEntry(
+                        label = entry.optString("label").ifBlank { "Draft ${index + 1}" },
+                        text = entry.optString("text"),
+                        reason = entry.optNullableString("reason"),
+                        wasStreamed = entry.optBoolean("wasStreamed", false),
+                        wasSelected = entry.optBoolean("wasSelected", false)
+                    )
+                )
+            }
+        }
 }

@@ -7,6 +7,7 @@ import com.runanywhere.kotlin_starter_example.domain.ai.PromptBuilder
 import com.runanywhere.kotlin_starter_example.domain.ai.ResponseParser
 import com.runanywhere.kotlin_starter_example.domain.ai.TextResponseSelector
 import com.runanywhere.kotlin_starter_example.domain.ai.TutorReplyGuard
+import com.runanywhere.kotlin_starter_example.domain.models.GenerationTraceEntry
 import com.runanywhere.kotlin_starter_example.domain.models.ReasoningStep
 import com.runanywhere.kotlin_starter_example.domain.models.StructuredResponse
 import com.runanywhere.sdk.public.RunAnywhere
@@ -61,6 +62,7 @@ class AIInferenceService {
         enabledTools: List<String> = emptyList(),
         imagePath: String? = null,
         conversationHistory: List<Pair<String, String>> = emptyList(),
+        onRetryStarted: suspend () -> Unit = {},
         onPartialResponse: suspend (String) -> Unit = {}
     ): StructuredResponse = withContext(Dispatchers.IO) {
         val isCompanionChat = isCompanionPrompt(customPrompt)
@@ -70,6 +72,7 @@ class AIInferenceService {
         val useVision = !imagePath.isNullOrBlank()
         val useTools = !useVision && shouldUseTools(userQuery, enabledTools)
         val textOptions = buildTextGenerationOptions(userQuery, mode, customPrompt)
+        val generationTrace = mutableListOf<GenerationTraceEntry>()
         
         // Track response time
         val startTime = System.currentTimeMillis()
@@ -104,6 +107,21 @@ class AIInferenceService {
         } else {
             streamTextResponse(prompt, userQuery, onPartialResponse, textOptions)
         }
+        generationTrace += GenerationTraceEntry(
+            label = when {
+                useVision -> "Vision Draft"
+                useTools -> "Tool Draft"
+                else -> "First Draft"
+            },
+            text = responseParser.sanitizeForDisplay(generationResult.rawText, userQuery),
+            reason = if (useVision || useTools) {
+                "This was the initial generated answer."
+            } else {
+                "This was the first draft generated for the question."
+            },
+            wasStreamed = !useVision && !useTools,
+            wasSelected = true
+        )
         if (
             !useVision &&
             !useTools &&
@@ -111,6 +129,7 @@ class AIInferenceService {
             (shouldRetryTextModeResponse(mode, generationResult.rawText) ||
                 TutorReplyGuard.shouldRetry(userQuery, generationResult.rawText))
         ) {
+            onRetryStarted()
             val retryResult = streamTextResponse(
                 prompt = buildTextRetryPrompt(
                     userQuery = userQuery,
@@ -122,20 +141,33 @@ class AIInferenceService {
                     previousResponse = generationResult.rawText
                 ),
                 userQuery = userQuery,
-                onPartialResponse = onPartialResponse,
+                onPartialResponse = {},
                 options = textOptions
             )
-            generationResult = if (
-                TextResponseSelector.chooseBetterResponse(
-                    mode = mode,
-                    userQuery = userQuery,
-                    firstAttempt = generationResult.rawText,
-                    retryAttempt = retryResult.rawText
-                ) == retryResult.rawText
-            ) {
+            generationTrace += GenerationTraceEntry(
+                label = "Retry Draft",
+                text = responseParser.sanitizeForDisplay(retryResult.rawText, userQuery),
+                reason = "A retry was generated because the first draft looked incomplete, off-topic, or weak for the selected mode.",
+                wasStreamed = false,
+                wasSelected = false
+            )
+            val selectedResponse = TextResponseSelector.chooseBetterResponse(
+                mode = mode,
+                userQuery = userQuery,
+                firstAttempt = generationResult.rawText,
+                retryAttempt = retryResult.rawText
+            )
+            generationResult = if (selectedResponse == retryResult.rawText) {
+                onPartialResponse(responseParser.sanitizeForDisplay(retryResult.rawText, userQuery))
                 retryResult
             } else {
+                onPartialResponse(responseParser.sanitizeForDisplay(generationResult.rawText, userQuery))
                 generationResult
+            }
+            generationTrace.indices.forEach { index ->
+                generationTrace[index] = generationTrace[index].copy(
+                    wasSelected = generationTrace[index].label == if (selectedResponse == retryResult.rawText) "Retry Draft" else "First Draft"
+                )
             }
         }
         if (!useVision && !useTools && !isCompanionChat && TutorReplyGuard.shouldRetry(userQuery, generationResult.rawText)) {
@@ -148,6 +180,16 @@ class AIInferenceService {
             generationResult = TextGenerationResult(
                 rawText = fallbackReply,
                 responseTokens = 0
+            )
+            generationTrace.indices.forEach { index ->
+                generationTrace[index] = generationTrace[index].copy(wasSelected = false)
+            }
+            generationTrace += GenerationTraceEntry(
+                label = "Fallback Answer",
+                text = responseParser.sanitizeForDisplay(fallbackReply, userQuery),
+                reason = "The earlier drafts still looked broken, so the app replaced them with a safe fallback answer.",
+                wasStreamed = true,
+                wasSelected = true
             )
         }
         if (!useVision && !useTools && isCompanionChat && shouldRetryCompanionReply(userQuery, generationResult.rawText)) {
@@ -199,7 +241,8 @@ class AIInferenceService {
             promptTokens = promptTokens,
             responseTokens = responseTokens,
             responseTimeMs = responseTime,
-            timeToFirstTokenMs = generationResult.timeToFirstTokenMs
+            timeToFirstTokenMs = generationResult.timeToFirstTokenMs,
+            generationTrace = generationTrace
         )
     }
 

@@ -15,6 +15,7 @@ import com.runanywhere.kotlin_starter_example.data.models.enums.FeedbackType
 import com.runanywhere.kotlin_starter_example.data.models.enums.Language
 import com.runanywhere.kotlin_starter_example.data.models.enums.ResponseMode
 import com.runanywhere.kotlin_starter_example.data.models.enums.UserLevel
+import com.runanywhere.kotlin_starter_example.domain.models.GenerationTraceEntry
 import com.runanywhere.kotlin_starter_example.domain.models.ReasoningStep
 import com.runanywhere.kotlin_starter_example.services.AIInferenceService
 import com.runanywhere.kotlin_starter_example.services.ToolRegistry
@@ -39,7 +40,8 @@ data class ChatMessage(
     val structuredResponse: com.runanywhere.kotlin_starter_example.domain.models.StructuredResponse? = null,
     val imageUri: Uri? = null,  // Support for image input in messages
     val assistantLabel: String? = null,
-    val isPending: Boolean = false
+    val isPending: Boolean = false,
+    val generationStatus: String? = null
 )
 
 data class TopicInsight(
@@ -58,7 +60,8 @@ data class AnswerSourceDetails(
     val promptTokens: Int = 0,
     val responseTokens: Int = 0,
     val responseTimeMs: Long = 0,
-    val timeToFirstTokenMs: Long? = null
+    val timeToFirstTokenMs: Long? = null,
+    val attempts: List<GenerationTraceEntry> = emptyList()
 )
 
 private data class RelevantMemoryMatch(
@@ -313,6 +316,11 @@ class AlgsochViewModel : ViewModel() {
                     enabledTools = if (imagePath != null) emptyList() else (selectedCustomMode?.enabledTools ?: emptyList()),
                     imagePath = imagePath,
                     conversationHistory = history,
+                    onRetryStarted = {
+                        withContext(Dispatchers.Main.immediate) {
+                            markPendingAssistantMessageAsRetrying(assistantMessageId)
+                        }
+                    },
                     onPartialResponse = { partial ->
                         withContext(Dispatchers.Main.immediate) {
                             updatePendingAssistantMessage(assistantMessageId, partial)
@@ -485,11 +493,12 @@ class AlgsochViewModel : ViewModel() {
             promptTokens = response.promptTokens,
             responseTokens = response.responseTokens,
             responseTimeMs = response.responseTimeMs,
-            timeToFirstTokenMs = response.timeToFirstTokenMs
+            timeToFirstTokenMs = response.timeToFirstTokenMs,
+            attempts = response.generationTrace
         )
         showReasoningDialog = true
 
-        val cacheKey = "${normalizeText(userQuery)}::${normalizeText(responseText)}::${response.mode.name}"
+        val cacheKey = "${normalizeText(userQuery)}::${normalizeText(responseText)}::${response.mode.name}::${response.generationTrace.size}"
         val cached = reasoningCache[cacheKey]
         if (cached != null) {
             reasoningSteps = cached
@@ -497,20 +506,9 @@ class AlgsochViewModel : ViewModel() {
             return
         }
 
-        reasoningSteps = emptyList()
-        isLoadingReasoning = true
-
-        viewModelScope.launch {
-            try {
-                val generatedSteps = aiService.generateReasoningSteps(userQuery, responseText)
-                reasoningCache[cacheKey] = generatedSteps
-                reasoningSteps = generatedSteps
-            } catch (_: Exception) {
-                reasoningSteps = emptyList()
-            } finally {
-                isLoadingReasoning = false
-            }
-        }
+        reasoningSteps = buildSourceTimelineSteps(sourceDetails!!)
+        reasoningCache[cacheKey] = reasoningSteps
+        isLoadingReasoning = false
     }
     
     fun dismissReasoningDialog() {
@@ -1217,7 +1215,8 @@ class AlgsochViewModel : ViewModel() {
             text = "Thinking...",
             isUser = false,
             assistantLabel = assistantLabel,
-            isPending = true
+            isPending = true,
+            generationStatus = "Generating..."
         )
     }
 
@@ -1227,7 +1226,21 @@ class AlgsochViewModel : ViewModel() {
             if (message.id == messageId) {
                 message.copy(
                     text = visibleText,
-                    isPending = true
+                    isPending = true,
+                    generationStatus = message.generationStatus ?: "Generating..."
+                )
+            } else {
+                message
+            }
+        }
+    }
+
+    private fun markPendingAssistantMessageAsRetrying(messageId: Long) {
+        messages = messages.map { message ->
+            if (message.id == messageId) {
+                message.copy(
+                    isPending = true,
+                    generationStatus = "Improving..."
                 )
             } else {
                 message
@@ -1266,10 +1279,57 @@ class AlgsochViewModel : ViewModel() {
                     .ifBlank { interruptionNote }
                 message.copy(
                     text = finalText,
-                    isPending = false
+                    isPending = false,
+                    generationStatus = null
                 )
             } else {
                 message
+            }
+        }
+    }
+
+    private fun buildSourceTimelineSteps(source: AnswerSourceDetails): List<ReasoningStep> {
+        val selectedAttempt = source.attempts.firstOrNull { it.wasSelected }
+        val attemptSteps = source.attempts.mapIndexed { index, attempt ->
+            ReasoningStep(
+                stepNumber = index + 2,
+                title = attempt.label,
+                description = buildString {
+                    attempt.reason?.takeIf { it.isNotBlank() }?.let {
+                        append(it)
+                        append(' ')
+                    }
+                    append(
+                        if (attempt.wasSelected) {
+                            "This became the final answer."
+                        } else {
+                            "This draft was reviewed but not kept as the final answer."
+                        }
+                    )
+                    if (attempt.wasStreamed) {
+                        append(" It was visible while the answer was being generated.")
+                    }
+                }.trim()
+            )
+        }
+
+        return buildList {
+            add(
+                ReasoningStep(
+                    stepNumber = 1,
+                    title = "Question And Mode",
+                    description = "The app answered the question in ${source.modeLabel} mode using ${source.modelName}."
+                )
+            )
+            addAll(attemptSteps)
+            if (selectedAttempt != null && source.attempts.size > 1) {
+                add(
+                    ReasoningStep(
+                        stepNumber = size + 1,
+                        title = "Final Selection",
+                        description = "${selectedAttempt.label} was chosen as the final visible answer because it matched the question best and cleared the retry checks."
+                    )
+                )
             }
         }
     }

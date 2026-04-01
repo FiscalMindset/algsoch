@@ -14,7 +14,8 @@ data class StructuredResponse(
     val promptTokens: Int = 0,
     val responseTokens: Int = 0,
     val responseTimeMs: Long = 0, // Response generation time
-    val timeToFirstTokenMs: Long? = null
+    val timeToFirstTokenMs: Long? = null,
+    val generationTrace: List<GenerationTraceEntry> = emptyList()
 ) {
     fun toDisplayText(): String = when (mode) {
         ResponseMode.DIRECT -> directAnswer.trim()

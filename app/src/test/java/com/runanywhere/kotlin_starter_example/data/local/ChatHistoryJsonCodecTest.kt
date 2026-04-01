@@ -2,6 +2,7 @@ package com.runanywhere.kotlin_starter_example.data.local
 
 import com.runanywhere.kotlin_starter_example.data.models.enums.Language
 import com.runanywhere.kotlin_starter_example.data.models.enums.ResponseMode
+import com.runanywhere.kotlin_starter_example.domain.models.GenerationTraceEntry
 import com.runanywhere.kotlin_starter_example.domain.models.StructuredResponse
 import com.runanywhere.kotlin_starter_example.ui.screens.algsoch.ChatMessage
 import org.junit.Assert.assertEquals
@@ -37,7 +38,16 @@ class ChatHistoryJsonCodecTest {
                     promptTokens = 712,
                     responseTokens = 253,
                     responseTimeMs = 15_300L,
-                    timeToFirstTokenMs = 740L
+                    timeToFirstTokenMs = 740L,
+                    generationTrace = listOf(
+                        GenerationTraceEntry(
+                            label = "First Draft",
+                            text = "LangChain is a framework for building applications with large language models.",
+                            reason = "This was the first draft generated for the question.",
+                            wasStreamed = true,
+                            wasSelected = true
+                        )
+                    )
                 )
             )
         )
@@ -57,6 +67,8 @@ class ChatHistoryJsonCodecTest {
         assertEquals(965, restoredAssistant.structuredResponse?.tokensUsed)
         assertEquals(15_300L, restoredAssistant.structuredResponse?.responseTimeMs)
         assertEquals(740L, restoredAssistant.structuredResponse?.timeToFirstTokenMs)
+        assertEquals(1, restoredAssistant.structuredResponse?.generationTrace?.size)
+        assertEquals("First Draft", restoredAssistant.structuredResponse?.generationTrace?.firstOrNull()?.label)
     }
 
     @Test

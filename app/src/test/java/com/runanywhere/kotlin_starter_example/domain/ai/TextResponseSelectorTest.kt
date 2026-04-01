@@ -133,4 +133,19 @@ class TextResponseSelectorTest {
 
         assertTrue(cleanScore > genericScore)
     }
+
+    @Test
+    fun directMode_keepsCompleteFirstAttemptWhenRetryIsBroken() {
+        val firstAttempt = "Python is a general-purpose programming language used for automation, web development, data work, and AI."
+        val retryAttempt = "Python is a high-level language used for many things. Here are some key features of Python: 1."
+
+        val chosen = TextResponseSelector.chooseBetterResponse(
+            mode = ResponseMode.DIRECT,
+            userQuery = "what is python",
+            firstAttempt = firstAttempt,
+            retryAttempt = retryAttempt
+        )
+
+        assertEquals(firstAttempt, chosen)
+    }
 }

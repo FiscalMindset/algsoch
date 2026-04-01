@@ -935,7 +935,7 @@ private fun MessageBubble(
                                     message.assistantLabel?.takeIf { it.isNotBlank() }?.let { assistantName ->
                                         TinyMetaChip(assistantName)
                                     }
-                                    TinyMetaChip("Generating...")
+                                    TinyMetaChip(message.generationStatus ?: "Generating...")
                                 }
                             } else {
                                 SelectionContainer {
@@ -1087,6 +1087,7 @@ private fun TinyMetaChip(
     onClick: (() -> Unit)? = null
 ) {
     Surface(
+        modifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier,
         color = BackgroundDark,
         shape = RoundedCornerShape(999.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, borderColor)
@@ -1094,7 +1095,6 @@ private fun TinyMetaChip(
         Text(
             text = label,
             modifier = Modifier
-                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
                 .padding(horizontal = 10.dp, vertical = 4.dp),
             style = MaterialTheme.typography.labelSmall,
             color = textColor
@@ -2530,7 +2530,7 @@ private fun ReasoningStepsDialog(
     isLoading: Boolean,
     onDismiss: () -> Unit
 ) {
-    val pagerState = rememberPagerState(pageCount = { 2 })
+    val pagerState = rememberPagerState(pageCount = { 3 })
     val scope = rememberCoroutineScope()
 
     ModalBottomSheet(
@@ -2542,7 +2542,7 @@ private fun ReasoningStepsDialog(
             Text("How This Answer Was Generated", style = MaterialTheme.typography.headlineSmall, color = Color.White, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
             Text(
-                "Swipe left or right between overview and steps. The overview opens instantly while the steps load in the background.",
+                "Swipe between overview, attempts, and steps. This sheet now shows the real local attempt trace for the answer.",
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary
             )
@@ -2559,10 +2559,16 @@ private fun ReasoningStepsDialog(
                     onClick = { scope.launch { pagerState.animateScrollToPage(0) } }
                 )
                 TinyMetaChip(
-                    label = "Steps",
+                    label = "Attempts",
                     textColor = if (pagerState.currentPage == 1) AccentBlue else TextMuted,
                     borderColor = if (pagerState.currentPage == 1) AccentBlue.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.12f),
                     onClick = { scope.launch { pagerState.animateScrollToPage(1) } }
+                )
+                TinyMetaChip(
+                    label = "Steps",
+                    textColor = if (pagerState.currentPage == 2) AccentBlue else TextMuted,
+                    borderColor = if (pagerState.currentPage == 2) AccentBlue.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.12f),
+                    onClick = { scope.launch { pagerState.animateScrollToPage(2) } }
                 )
             }
 
@@ -2607,6 +2613,13 @@ private fun ReasoningStepsDialog(
                                         content = source.answer,
                                         accent = AccentGreen
                                     )
+                                    SourceInfoCard(
+                                        title = "Final Selection",
+                                        content = source.attempts.firstOrNull { it.wasSelected }?.label
+                                            ?.let { "$it was kept as the final visible answer." }
+                                            ?: "No attempt trace is available for this reply.",
+                                        accent = AccentBlue
+                                    )
                                 } ?: SourceInfoCard(
                                     title = "Source",
                                     content = "No source data is available for this reply yet.",
@@ -2617,58 +2630,120 @@ private fun ReasoningStepsDialog(
                     }
 
                     else -> {
-                        when {
-                            isLoading -> {
+                        when (page) {
+                            1 -> {
                                 Box(
                                     modifier = Modifier.fillMaxSize(),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        CircularProgressIndicator(color = AccentBlue)
-                                        Spacer(Modifier.height(12.dp))
+                                    if (sourceDetails?.attempts.isNullOrEmpty()) {
                                         Text(
-                                            "Building the step-by-step source view...",
+                                            "No attempt-by-attempt trace is available for this reply.",
                                             color = TextSecondary,
                                             style = MaterialTheme.typography.bodySmall
                                         )
+                                    } else {
+                                        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                            items(sourceDetails?.attempts.orEmpty()) { attempt ->
+                                                Surface(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    color = if (attempt.wasSelected) AccentBlue.copy(alpha = 0.12f) else SurfaceSecondary,
+                                                    shape = RoundedCornerShape(12.dp),
+                                                    border = if (attempt.wasSelected) androidx.compose.foundation.BorderStroke(1.dp, AccentBlue.copy(alpha = 0.35f)) else null
+                                                ) {
+                                                    Column(modifier = Modifier.padding(16.dp)) {
+                                                        Row(
+                                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                            verticalAlignment = Alignment.CenterVertically
+                                                        ) {
+                                                            Text(
+                                                                text = attempt.label,
+                                                                style = MaterialTheme.typography.labelLarge,
+                                                                color = if (attempt.wasSelected) AccentBlue else Color.White,
+                                                                fontWeight = FontWeight.Bold
+                                                            )
+                                                            if (attempt.wasSelected) {
+                                                                TinyMetaChip(
+                                                                    label = "Final",
+                                                                    textColor = AccentBlue,
+                                                                    borderColor = AccentBlue.copy(alpha = 0.28f)
+                                                                )
+                                                            }
+                                                            if (attempt.wasStreamed) {
+                                                                TinyMetaChip("Visible")
+                                                            }
+                                                        }
+                                                        attempt.reason?.takeIf { it.isNotBlank() }?.let { reason ->
+                                                            Spacer(Modifier.height(8.dp))
+                                                            Text(
+                                                                text = reason,
+                                                                style = MaterialTheme.typography.bodySmall,
+                                                                color = TextSecondary
+                                                            )
+                                                        }
+                                                        Spacer(Modifier.height(10.dp))
+                                                        SelectionContainer {
+                                                            Text(
+                                                                text = attempt.text.ifBlank { "[No visible text captured for this attempt]" },
+                                                                style = MaterialTheme.typography.bodySmall,
+                                                                color = Color.White.copy(alpha = 0.92f)
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
 
-                            reasoningSteps.isEmpty() -> {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        "No step-by-step source details are available for this reply.",
-                                        color = TextSecondary,
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
-                                }
-                            }
-
                             else -> {
-                                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    items(reasoningSteps) { step ->
-                                        Surface(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            color = SurfaceSecondary,
-                                            shape = RoundedCornerShape(12.dp)
+                                when {
+                                    isLoading -> {
+                                        Box(
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentAlignment = Alignment.Center
                                         ) {
-                                            Column(modifier = Modifier.padding(16.dp)) {
-                                                Text(
-                                                    "Step ${step.stepNumber}: ${step.title}",
-                                                    style = MaterialTheme.typography.labelLarge,
-                                                    color = AccentBlue,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                                Spacer(Modifier.height(8.dp))
-                                                Text(
-                                                    step.description,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = TextSecondary
-                                                )
+                                            CircularProgressIndicator(color = AccentBlue)
+                                        }
+                                    }
+
+                                    reasoningSteps.isEmpty() -> {
+                                        Box(
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                "No step-by-step source details are available for this reply.",
+                                                color = TextSecondary,
+                                                style = MaterialTheme.typography.bodySmall
+                                            )
+                                        }
+                                    }
+
+                                    else -> {
+                                        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                            items(reasoningSteps) { step ->
+                                                Surface(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    color = SurfaceSecondary,
+                                                    shape = RoundedCornerShape(12.dp)
+                                                ) {
+                                                    Column(modifier = Modifier.padding(16.dp)) {
+                                                        Text(
+                                                            "Step ${step.stepNumber}: ${step.title}",
+                                                            style = MaterialTheme.typography.labelLarge,
+                                                            color = AccentBlue,
+                                                            fontWeight = FontWeight.Bold
+                                                        )
+                                                        Spacer(Modifier.height(8.dp))
+                                                        Text(
+                                                            step.description,
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = TextSecondary
+                                                        )
+                                                    }
+                                                }
                                             }
                                         }
                                     }
