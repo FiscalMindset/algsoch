@@ -189,10 +189,6 @@ class ModelService : ViewModel() {
             warmUpLLMIfNeeded()
         }
 
-        if (isVLMDownloaded && !isVLMLoaded && !isVLMLoading) {
-            loadVLMInternal(allowDownload = false, clearErrors = false)
-        }
-
         refreshModelState()
     }
     
@@ -475,7 +471,7 @@ class ModelService : ViewModel() {
             RunAnywhere.loadVLMModel(VLM_MODEL_ID)
             isVLMLoaded = true
         } catch (e: Exception) {
-            errorMessage = "VLM load failed: ${e.message}"
+            errorMessage = formatVlmLoadError(e)
         } finally {
             isVLMDownloading = false
             isVLMLoading = false
@@ -500,6 +496,26 @@ class ModelService : ViewModel() {
             // Warmup is a best-effort optimization only.
         } finally {
             isLLMWarmingUp = false
+        }
+    }
+
+    private fun formatVlmLoadError(error: Exception): String {
+        val rawMessage = error.message?.trim().orEmpty()
+        val normalized = rawMessage.lowercase()
+        val looksLikeMemoryPressure =
+            normalized.contains("error: -111") ||
+                normalized.contains("(-111)") ||
+                normalized.contains("out of memory") ||
+                normalized.contains("insufficient memory")
+
+        return if (looksLikeMemoryPressure) {
+            if (isLLMLoaded) {
+                "VLM load failed (error -111). Your device likely ran out of free memory while the chat model was already loaded. Use 'Free model memory' in Model Status, then load Vision again."
+            } else {
+                "VLM load failed (error -111). Your device likely could not free enough memory for the vision model. Close other apps, reopen the app, and try loading Vision first."
+            }
+        } else {
+            "VLM load failed: ${rawMessage.ifBlank { "Unknown error" }}"
         }
     }
 }

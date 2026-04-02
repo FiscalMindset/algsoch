@@ -39,6 +39,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -74,8 +76,9 @@ fun AlgsochScreen(
 ) {
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     var showModeSelector by remember { mutableStateOf(false) }
     var showHistory by remember { mutableStateOf(false) }
     var showModelStatus by remember { mutableStateOf(false) }
@@ -101,6 +104,18 @@ fun AlgsochScreen(
     LaunchedEffect(initialAssistantId) {
         viewModel.initialize(context)
         viewModel.applyLaunchSelection(initialAssistantId)
+    }
+
+    LaunchedEffect(viewModel.messages.size, viewModel.isGenerating) {
+        val targetIndex = when {
+            viewModel.isGenerating && viewModel.messages.lastOrNull()?.isPending != true -> viewModel.messages.size
+            viewModel.messages.isNotEmpty() -> viewModel.messages.lastIndex
+            else -> -1
+        }
+        if (targetIndex >= 0) {
+            kotlinx.coroutines.delay(80)
+            listState.animateScrollToItem(targetIndex)
+        }
     }
 
     Scaffold(
@@ -154,32 +169,32 @@ fun AlgsochScreen(
                 }
                 
                 // Unified Input Bar
-                if (modelService.isLLMLoaded) {
-                    UnifiedInputBar(
-                        value = inputText,
-                        onValueChange = { inputText = it },
-                        onSend = {
-                            viewModel.sendMessage(inputText, selectedImageUri, modelService.isVLMLoaded)
-                            inputText = ""
-                            selectedImageUri = null
-                            scope.launch {
-                                kotlinx.coroutines.delay(100)
-                                listState.animateScrollToItem(viewModel.messages.size)
-                            }
-                        },
-                        onCancel = { viewModel.cancelGeneration() },
-                        onImageClick = { showImageSourceSheet = true },
-                        onModeClick = { showModeSelector = true },
-                        selectedMode = viewModel.selectedCustomMode?.name ?: viewModel.selectedMode.displayName(),
-                        isGenerating = viewModel.isGenerating,
-                        selectedImageUri = selectedImageUri,
-                        onClearImage = { selectedImageUri = null },
-                        isVisionReady = modelService.isVLMLoaded,
-                        isVisionDownloaded = modelService.isVLMDownloaded,
-                        isVisionLoading = modelService.isVLMLoading || modelService.isVLMDownloading,
-                        onLoadVisionModel = { modelService.downloadAndLoadVLM() }
-                    )
-                }
+                UnifiedInputBar(
+                    value = inputText,
+                    onValueChange = { inputText = it },
+                    onSend = {
+                        focusManager.clearFocus(force = true)
+                        keyboardController?.hide()
+                        viewModel.sendMessage(inputText, selectedImageUri, modelService.isVLMLoaded)
+                        inputText = ""
+                        selectedImageUri = null
+                    },
+                    onCancel = { viewModel.cancelGeneration() },
+                    onImageClick = { showImageSourceSheet = true },
+                    onModeClick = { showModeSelector = true },
+                    selectedMode = viewModel.selectedCustomMode?.name ?: viewModel.selectedMode.displayName(),
+                    isGenerating = viewModel.isGenerating,
+                    selectedImageUri = selectedImageUri,
+                    onClearImage = { selectedImageUri = null },
+                    isChatReady = modelService.isLLMLoaded,
+                    isChatDownloaded = modelService.isLLMDownloaded,
+                    isChatLoading = modelService.isLLMLoading || modelService.isLLMDownloading,
+                    onLoadChatModel = { modelService.downloadAndLoadLLM() },
+                    isVisionReady = modelService.isVLMLoaded,
+                    isVisionDownloaded = modelService.isVLMDownloaded,
+                    isVisionLoading = modelService.isVLMLoading || modelService.isVLMDownloading,
+                    onLoadVisionModel = { modelService.downloadAndLoadVLM() }
+                )
             }
         }
     }
@@ -202,6 +217,7 @@ fun AlgsochScreen(
             modelService = modelService,
             onLoadChatModel = { modelService.downloadAndLoadLLM() },
             onLoadVisionModel = { modelService.downloadAndLoadVLM() },
+            onUnloadModels = { modelService.unloadAllModels() },
             onDismiss = { showModelStatus = false }
         )
     }
@@ -367,6 +383,7 @@ private fun ModelStatusSheet(
     modelService: ModelService,
     onLoadChatModel: () -> Unit,
     onLoadVisionModel: () -> Unit,
+    onUnloadModels: () -> Unit,
     onDismiss: () -> Unit
 ) {
     ModalBottomSheet(
@@ -399,6 +416,20 @@ private fun ModelStatusSheet(
                 onLoadChatModel = onLoadChatModel,
                 onLoadVisionModel = onLoadVisionModel
             )
+
+            if (
+                modelService.isLLMLoaded || modelService.isLLMLoading || modelService.isLLMDownloading ||
+                modelService.isVLMLoaded || modelService.isVLMLoading || modelService.isVLMDownloading
+            ) {
+                TextButton(
+                    onClick = onUnloadModels,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                ) {
+                    Icon(Icons.Rounded.ClearAll, null, tint = TextMuted, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Free model memory", color = TextMuted)
+                }
+            }
         }
     }
 }
@@ -594,18 +625,66 @@ private fun UnifiedInputBar(
     isGenerating: Boolean,
     selectedImageUri: Uri?,
     onClearImage: () -> Unit,
+    isChatReady: Boolean,
+    isChatDownloaded: Boolean,
+    isChatLoading: Boolean,
+    onLoadChatModel: () -> Unit,
     isVisionReady: Boolean,
     isVisionDownloaded: Boolean,
     isVisionLoading: Boolean,
     onLoadVisionModel: () -> Unit
 ) {
+    val shouldLoadVision = selectedImageUri != null && !isVisionReady
+    val canSendImagePrompt = selectedImageUri != null && isVisionReady
+    val canSendTextPrompt = selectedImageUri == null && isChatReady && value.isNotBlank()
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(SurfaceSecondary)
             .padding(16.dp)
             .navigationBarsPadding()
+            .imePadding()
     ) {
+        if (!isChatReady) {
+            Surface(
+                color = AccentOrange.copy(alpha = 0.2f),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Rounded.Memory, null, tint = AccentOrange, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        when {
+                            isChatLoading -> "Chat model is getting ready."
+                            isChatDownloaded -> "Chat model is downloaded but not loaded."
+                            else -> "Chat model is not downloaded yet."
+                        },
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = onLoadChatModel, enabled = !isChatLoading) {
+                        Text(
+                            when {
+                                isChatLoading -> "Loading..."
+                                isChatDownloaded -> "Load Chat"
+                                else -> "Download & Load"
+                            },
+                            color = AccentOrange
+                        )
+                    }
+                }
+            }
+        }
+
         if (selectedImageUri != null && !isVisionReady) {
             Surface(
                 color = AccentBlue.copy(alpha = 0.2f),
@@ -698,7 +777,15 @@ private fun UnifiedInputBar(
                 value = value,
                 onValueChange = onValueChange,
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Ask anything...", color = TextMuted) },
+                placeholder = {
+                    Text(
+                        when {
+                            canSendImagePrompt || isChatReady -> "Ask anything..."
+                            else -> "Load chat model to send messages"
+                        },
+                        color = TextMuted
+                    )
+                },
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = BackgroundDark,
                     unfocusedContainerColor = BackgroundDark,
@@ -721,16 +808,27 @@ private fun UnifiedInputBar(
                 onClick = {
                     if (isGenerating) {
                         onCancel()
-                    } else if ((value.isNotBlank() || selectedImageUri != null) && !isGenerating) {
+                    } else if (shouldLoadVision) {
+                        onLoadVisionModel()
+                    } else if (canSendImagePrompt || canSendTextPrompt) {
                         onSend()
+                    } else if (!isChatReady) {
+                        onLoadChatModel()
                     }
                 },
-                containerColor = if (isGenerating) Color(0xFFFF5252) else AccentBlue,
+                containerColor = when {
+                    isGenerating -> Color(0xFFFF5252)
+                    shouldLoadVision -> AccentGreen
+                    !isChatReady -> AccentOrange
+                    else -> AccentBlue
+                },
                 modifier = Modifier.size(48.dp),
                 shape = RoundedCornerShape(16.dp)
             ) {
                 if (isGenerating) {
                     Icon(Icons.Rounded.Close, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                } else if (shouldLoadVision || !isChatReady) {
+                    Icon(Icons.Rounded.Memory, null, tint = Color.White, modifier = Modifier.size(22.dp))
                 } else {
                     Icon(Icons.AutoMirrored.Rounded.Send, null, tint = Color.White, modifier = Modifier.size(22.dp))
                 }
@@ -1165,12 +1263,16 @@ private sealed class AssistantContentSegment {
     data class Code(val codeBlock: CodeBlock) : AssistantContentSegment()
 }
 
+private val assistantCodeBlockPattern = Regex(
+    "```([A-Za-z0-9_+#.-]+)?[ \\t]*\\n?([\\s\\S]*?)```",
+    RegexOption.MULTILINE
+)
+
 private fun parseAssistantContentSegments(text: String): List<AssistantContentSegment> {
-    val codeBlockPattern = Regex("```(\\w+)?\\n([\\s\\S]*?)```", RegexOption.MULTILINE)
     val segments = mutableListOf<AssistantContentSegment>()
     var currentIndex = 0
 
-    codeBlockPattern.findAll(text).forEach { match ->
+    assistantCodeBlockPattern.findAll(text).forEach { match ->
         if (match.range.first > currentIndex) {
             segments += AssistantContentSegment.Prose(text.substring(currentIndex, match.range.first))
         }
@@ -1240,7 +1342,6 @@ private fun SenderBadge(label: String, isUser: Boolean) {
 }
 
 private fun buildFormattedAssistantText(text: String): AnnotatedString = buildAnnotatedString {
-    val codeBlockPattern = Regex("```(\\w+)?\\n([\\s\\S]*?)```", RegexOption.MULTILINE)
     val inlineCodePattern = Regex("`([^`\n]+)`")
     val numberedTitlePattern = Regex("""^(\d+\.\s+[^:]{1,80}:)(\s*.*)$""")
     val bulletTitlePattern = Regex("""^(-\s+[^:]{1,80}:)(\s*.*)$""")
@@ -1249,7 +1350,7 @@ private fun buildFormattedAssistantText(text: String): AnnotatedString = buildAn
     val genericSectionPattern = Regex("""^([A-Z][A-Za-z ]{1,30}:)(\s*.*)$""")
     
     var currentIndex = 0
-    val codeBlocks = codeBlockPattern.findAll(text).toList()
+    val codeBlocks = assistantCodeBlockPattern.findAll(text).toList()
     
     // Process text with code blocks
     codeBlocks.forEach { match ->
@@ -1303,52 +1404,92 @@ private fun buildFormattedAssistantText(text: String): AnnotatedString = buildAn
 }
 
 private fun AnnotatedString.Builder.highlightCodeLine(line: String) {
-    // Keywords (Python, JavaScript, Java, etc.)
-    val keywordPattern = Regex("\\b(def|class|return|if|else|elif|for|while|import|from|function|const|let|var|async|await|public|private|void|int|String)\\b")
-    // Strings
-    val stringPattern = Regex("\"([^\"]*)\"|'([^']*)'")
-    // Comments
-    val commentPattern = Regex("(#.*$|//.*$)")
-    // Function calls
-    val functionPattern = Regex("\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\(")
-    // Numbers
-    val numberPattern = Regex("\\b\\d+\\.?\\d*\\b")
-    
-    var currentPos = 0
-    val segments = mutableListOf<Pair<IntRange, SpanStyle?>>()
-    
-    // Find all patterns
-    commentPattern.find(line)?.let { segments.add(it.range to SpanStyle(color = Color(0xFF6A9955))) }
-    stringPattern.findAll(line).forEach { segments.add(it.range to SpanStyle(color = Color(0xFFCE9178))) }
-    keywordPattern.findAll(line).forEach { segments.add(it.range to SpanStyle(color = Color(0xFF569CD6), fontWeight = FontWeight.Bold)) }
-    functionPattern.findAll(line).forEach { 
-        val nameRange = IntRange(it.groups[1]!!.range.first, it.groups[1]!!.range.last)
-        segments.add(nameRange to SpanStyle(color = Color(0xFFDCDCAA))) 
-    }
-    numberPattern.findAll(line).forEach { segments.add(it.range to SpanStyle(color = Color(0xFFB5CEA8))) }
-    
-    // Sort segments by position
-    val sortedSegments = segments.sortedBy { it.first.first }
-    
-    // Apply highlighting
-    sortedSegments.forEach { (range, style) ->
-        if (range.first > currentPos) {
-            withStyle(SpanStyle(color = Color(0xFF9CDCFE))) {
-                append(line.substring(currentPos, range.first))
-            }
+    val defaultStyle = SpanStyle(color = Color(0xFF9CDCFE))
+    val keywordStyle = SpanStyle(color = Color(0xFF569CD6), fontWeight = FontWeight.Bold)
+    val stringStyle = SpanStyle(color = Color(0xFFCE9178))
+    val commentStyle = SpanStyle(color = Color(0xFF6A9955))
+    val functionStyle = SpanStyle(color = Color(0xFFDCDCAA))
+    val numberStyle = SpanStyle(color = Color(0xFFB5CEA8))
+    val keywords = setOf(
+        "def", "class", "return", "if", "else", "elif", "for", "while", "import", "from",
+        "function", "const", "let", "var", "async", "await", "public", "private", "void",
+        "int", "String", "true", "false", "null", "None", "True", "False"
+    )
+
+    fun appendStyled(text: String, style: SpanStyle) {
+        withStyle(style) {
+            append(text)
         }
-        if (style != null) {
-            withStyle(style) {
-                append(line.substring(range.first, range.last + 1))
-            }
-        }
-        currentPos = range.last + 1
     }
-    
-    // Append remaining text
-    if (currentPos < line.length) {
-        withStyle(SpanStyle(color = Color(0xFF9CDCFE))) {
-            append(line.substring(currentPos))
+
+    fun findStringEnd(startIndex: Int, quote: Char): Int {
+        var cursor = startIndex + 1
+        while (cursor < line.length) {
+            if (line[cursor] == quote && line.getOrNull(cursor - 1) != '\\') {
+                return cursor + 1
+            }
+            cursor++
+        }
+        return line.length
+    }
+
+    fun nextNonWhitespace(startIndex: Int): Int {
+        var cursor = startIndex
+        while (cursor < line.length && line[cursor].isWhitespace()) {
+            cursor++
+        }
+        return cursor
+    }
+
+    fun isNumberStart(index: Int): Boolean {
+        if (!line[index].isDigit()) return false
+        val previous = line.getOrNull(index - 1)
+        return previous == null || (!previous.isLetterOrDigit() && previous != '_' && previous != '.')
+    }
+
+    var index = 0
+    while (index < line.length) {
+        when {
+            line.startsWith("//", index) || line[index] == '#' -> {
+                appendStyled(line.substring(index), commentStyle)
+                return
+            }
+
+            line[index] == '"' || line[index] == '\'' -> {
+                val end = findStringEnd(index, line[index])
+                appendStyled(line.substring(index, end), stringStyle)
+                index = end
+            }
+
+            isNumberStart(index) -> {
+                var end = index + 1
+                while (end < line.length && (line[end].isDigit() || line[end] == '.' || line[end] == '_')) {
+                    end++
+                }
+                appendStyled(line.substring(index, end), numberStyle)
+                index = end
+            }
+
+            line[index].isLetter() || line[index] == '_' -> {
+                var end = index + 1
+                while (end < line.length && (line[end].isLetterOrDigit() || line[end] == '_')) {
+                    end++
+                }
+
+                val token = line.substring(index, end)
+                val style = when {
+                    token in keywords -> keywordStyle
+                    nextNonWhitespace(end).let { it < line.length && line[it] == '(' } -> functionStyle
+                    else -> defaultStyle
+                }
+                appendStyled(token, style)
+                index = end
+            }
+
+            else -> {
+                appendStyled(line[index].toString(), defaultStyle)
+                index++
+            }
         }
     }
 }
@@ -3166,8 +3307,7 @@ private data class CodeBlock(
 
 // Helper function to extract first code block from text
 private fun extractFirstCodeBlock(text: String): CodeBlock? {
-    val codeBlockPattern = Regex("```(\\w+)?\\n?([\\s\\S]*?)```", RegexOption.MULTILINE)
-    val match = codeBlockPattern.find(text) ?: return null
+    val match = assistantCodeBlockPattern.find(text) ?: return null
     
     val language = match.groupValues[1].ifBlank { "code" }
     val code = match.groupValues[2].trim()
