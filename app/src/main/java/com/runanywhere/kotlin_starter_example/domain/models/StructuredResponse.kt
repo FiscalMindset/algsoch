@@ -25,7 +25,7 @@ data class StructuredResponse(
         ResponseMode.CREATIVE,
         ResponseMode.THEORY -> joinSections(directAnswer, quickExplanation, deepExplanation)
 
-        ResponseMode.NOTES, ResponseMode.DIRECTION -> buildString {
+        ResponseMode.CODE, ResponseMode.DIRECTION -> buildString {
             append(directAnswer.trim())
             if (!quickExplanation.isBlank()) {
                 appendLine()

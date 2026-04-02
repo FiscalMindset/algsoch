@@ -379,21 +379,17 @@ class AIInferenceService {
             """.trimIndent()
         }
 
-        ResponseMode.NOTES -> if (retry) {
+        ResponseMode.CODE -> if (retry) {
             """
-            Use study-note format only.
-            Start with a short title line.
-            Then write 5 to 7 bullet points beginning with "- ".
-            Include visible details, important text or labels, and the main takeaway.
-            End with "Summary: ..." on its own line.
+            Write complete, working code in proper markdown code blocks.
+            Include all necessary imports, error handling, and comments.
+            Format with proper indentation. Write 8 to 12 lines minimum.
             """.trimIndent()
         } else {
             """
-            Use study-note format only.
-            Start with a short title line.
-            Then write 4 to 6 bullet points beginning with "- ".
-            Include visible details, important text or labels, and the main takeaway.
-            End with "Summary: ..." on its own line.
+            Write complete, working code in proper markdown code blocks.
+            Include necessary imports and brief explanatory comments.
+            Format with proper indentation.
             """.trimIndent()
         }
 
@@ -455,17 +451,51 @@ class AIInferenceService {
         primaryPrompt: String,
         retryPrompt: String
     ): String {
-        val vlmImage = VLMImage.fromFilePath(imagePath)
-        val firstAttempt = streamVisionResponse(vlmImage, primaryPrompt, maxTokens = 420)
-        if (!shouldRetryVisionResponse(firstAttempt)) {
-            return firstAttempt
-        }
+        return try {
+            val vlmImage = VLMImage.fromFilePath(imagePath)
+            
+            // First attempt with error handling
+            val firstAttempt = try {
+                streamVisionResponse(vlmImage, primaryPrompt, maxTokens = 420)
+            } catch (e: Exception) {
+                // If first attempt fails, try with a simpler prompt
+                "Error processing image: ${e.message}. Retrying with enhanced prompt..."
+            }
+            
+            // Check if retry is needed
+            if (!shouldRetryVisionResponse(firstAttempt) && !firstAttempt.contains("Error processing")) {
+                return firstAttempt
+            }
 
-        val retryAttempt = streamVisionResponse(vlmImage, retryPrompt, maxTokens = 520)
-        return if (scoreVisionResponse(retryAttempt) >= scoreVisionResponse(firstAttempt)) {
-            retryAttempt
-        } else {
-            firstAttempt
+            // Retry attempt with more tokens and better prompt
+            val retryAttempt = try {
+                streamVisionResponse(vlmImage, retryPrompt, maxTokens = 600)
+            } catch (e: Exception) {
+                // If retry also fails, return a user-friendly message
+                return "I'm having trouble analyzing this image. The image might be corrupted, too large, or in an unsupported format. Please try:\n- Taking a clearer photo\n- Selecting a different image\n- Ensuring the image is not corrupted"
+            }
+            
+            // Compare attempts and return better one
+            val firstScore = scoreVisionResponse(firstAttempt)
+            val retryScore = scoreVisionResponse(retryAttempt)
+            
+            if (retryScore >= firstScore && retryScore >= 3) {
+                retryAttempt
+            } else if (firstScore >= 3) {
+                firstAttempt
+            } else {
+                // Both attempts are poor quality, try one more time with maximum context
+                try {
+                    val finalAttempt = streamVisionResponse(vlmImage, "$retryPrompt\n\nPlease provide a detailed description of what you see in the image.", maxTokens = 720)
+                    if (scoreVisionResponse(finalAttempt) >= 3) finalAttempt else retryAttempt
+                } catch (e: Exception) {
+                    retryAttempt.ifBlank {
+                        "Unable to generate a complete description of the image. Please try again with a different image."
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            "Failed to process the image: ${e.message}. Please ensure the image is accessible and try again."
         }
     }
 
@@ -533,7 +563,7 @@ class AIInferenceService {
             ResponseMode.ANSWER -> isBrokenAnswerModeResponse(cleaned, sentenceCount)
             ResponseMode.EXPLAIN -> cleaned.length < 220 || sentenceCount < 4
             ResponseMode.THEORY -> cleaned.length < 320 || sentenceCount < 5
-            ResponseMode.NOTES -> !cleaned.contains("Summary:") || Regex("(?m)^- ").findAll(cleaned).count() < 3
+            ResponseMode.CODE -> !cleaned.contains("```") || cleaned.length < 50
             ResponseMode.DIRECTION -> !Regex("(?im)^Step\\s+1:").containsMatchIn(cleaned)
             ResponseMode.CREATIVE -> cleaned.length < 220 || sentenceCount < 4
         }
@@ -647,9 +677,12 @@ class AIInferenceService {
             Cover what it is, why it matters, where it is used, and one simple example or takeaway.
             Never answer with generic reset lines like "I'm ready to assist you" or "What's the first question?".
         """.trimIndent()
-        ResponseMode.NOTES -> """
-            Use notes format only:
-            title line, 4 to 6 bullet points starting with "- ", then "Summary: ...".
+        ResponseMode.CODE -> """
+            Write complete, well-formatted code with proper syntax.
+            Use markdown code blocks with language specification (```language).
+            Include all necessary imports and error handling.
+            Add brief comments explaining the key logic.
+            Never leave TODO comments or incomplete implementations.
             Never answer with generic reset lines like "I'm ready to assist you" or "What's the first question?".
         """.trimIndent()
         ResponseMode.DIRECTION -> """
@@ -937,7 +970,7 @@ class AIInferenceService {
             ResponseMode.DIRECT -> (if (isCompanion) 420 else 420) + complexityBoost
             ResponseMode.ANSWER -> 520 + complexityBoost
             ResponseMode.EXPLAIN -> 760 + complexityBoost
-            ResponseMode.NOTES -> 620 + complexityBoost
+            ResponseMode.CODE -> 1200 + complexityBoost  // More tokens for complete code
             ResponseMode.DIRECTION -> 620 + complexityBoost
             ResponseMode.CREATIVE -> 760 + complexityBoost
             ResponseMode.THEORY -> 920 + complexityBoost
@@ -945,14 +978,16 @@ class AIInferenceService {
         val temperature = when (mode) {
             ResponseMode.DIRECT -> if (isCompanion) 0.58f else 0.22f
             ResponseMode.ANSWER -> 0.28f
-            ResponseMode.NOTES, ResponseMode.DIRECTION -> 0.25f
+            ResponseMode.CODE -> 0.15f  // Low temperature for precise code
+            ResponseMode.DIRECTION -> 0.25f
             ResponseMode.EXPLAIN, ResponseMode.THEORY -> 0.35f
             ResponseMode.CREATIVE -> 0.75f
         }
         val topP = when (mode) {
             ResponseMode.DIRECT -> if (isCompanion) 0.9f else 0.8f
             ResponseMode.CREATIVE -> 0.95f
-            ResponseMode.ANSWER, ResponseMode.NOTES, ResponseMode.DIRECTION -> 0.84f
+            ResponseMode.CODE -> 0.75f  // Lower for more deterministic code
+            ResponseMode.ANSWER, ResponseMode.DIRECTION -> 0.84f
             else -> 0.9f
         }
 

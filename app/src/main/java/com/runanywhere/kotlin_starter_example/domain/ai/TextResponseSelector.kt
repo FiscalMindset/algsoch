@@ -72,10 +72,11 @@ internal object TextResponseSelector {
                 if (sentenceCount >= 4) score += 3.0 else score -= 2.0
             }
 
-            ResponseMode.NOTES -> {
-                score += bulletCount * 1.4
-                if (hasSummary) score += 3.5 else score -= 3.0
-                if (bulletCount >= 4) score += 3.0 else score -= 2.0
+            ResponseMode.CODE -> {
+                // Check for code blocks
+                val hasCodeBlock = cleaned.contains("```")
+                if (hasCodeBlock) score += 4.0 else score -= 3.0
+                if (normalized.length >= 50) score += 2.0
             }
 
             ResponseMode.DIRECTION -> {

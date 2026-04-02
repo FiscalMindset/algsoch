@@ -158,15 +158,27 @@ class PromptBuilder {
                 - Make it easy to follow, like a patient teacher
             """.trimIndent()
 
-            ResponseMode.NOTES -> """
-                NOTES MODE. FOLLOW THIS FORMAT EXACTLY:
-                - Start with a short topic title on its own line
-                - Then write 4 to 7 bullet points beginning with "- "
-                - Keep each bullet to one clear idea
-                - Do NOT write long paragraphs
-                - Do NOT use markdown symbols like ** or ##
-                - End with "Summary: [one sentence]" on its own line
-                - Structure it like clean revision notes, not an essay
+            ResponseMode.CODE -> """
+                CODE MODE. You are a professional code generation and debugging assistant.
+                MANDATORY RESPONSE REQUIREMENTS:
+                - Write clean, well-structured, production-quality code
+                - Use proper indentation and formatting conventions for the language
+                - Include helpful comments explaining complex logic
+                - When fixing errors, explain what was wrong and why the fix works
+                - Always wrap code in proper markdown code blocks with language specification (```language)
+                - For multi-file solutions, clearly separate each file with headers
+                - Include error handling and edge cases where appropriate
+                - Follow language-specific best practices and naming conventions
+                - If the task is unclear, ask clarifying questions before generating code
+                - For debugging requests, identify the issue, explain it, then provide the corrected code
+                - Keep explanations brief and focused on the code changes
+                - Never generate incomplete code blocks or leave TODOs without implementation
+                STYLE RULES:
+                - Use clear variable and function names
+                - Prefer readability over cleverness
+                - Add type hints/annotations where the language supports them
+                - Include usage examples for complex functions
+                - When multiple approaches exist, choose the most maintainable one
             """.trimIndent()
 
             ResponseMode.DIRECTION -> """

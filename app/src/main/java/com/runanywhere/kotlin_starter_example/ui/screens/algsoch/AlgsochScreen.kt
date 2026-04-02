@@ -890,6 +890,42 @@ private fun MessageBubble(
                                     softWrap = true
                                 )
                             }
+                            
+                            // Code Preview Button (if code block detected)
+                            val codeBlock = extractFirstCodeBlock(fullContent)
+                            if (codeBlock != null && codeBlock.language.lowercase() in listOf("html", "javascript", "js", "css")) {
+                                Spacer(Modifier.height(12.dp))
+                                var showCodePreview by remember { mutableStateOf(false) }
+                                
+                                Button(
+                                    onClick = { showCodePreview = true },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = AccentGreen.copy(alpha = 0.2f)
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.PlayArrow,
+                                        contentDescription = null,
+                                        tint = AccentGreen,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        "Run Code in Canvas",
+                                        color = AccentGreen,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                
+                                if (showCodePreview) {
+                                    com.runanywhere.kotlin_starter_example.ui.components.CodePreviewCanvas(
+                                        code = codeBlock.code,
+                                        language = codeBlock.language,
+                                        onDismiss = { showCodePreview = false }
+                                    )
+                                }
+                            }
 
                             Spacer(Modifier.height(16.dp))
                             HorizontalDivider(color = AccentBlue.copy(alpha = 0.2f), thickness = 1.dp)
@@ -1061,13 +1097,67 @@ private fun SenderBadge(label: String, isUser: Boolean) {
 }
 
 private fun buildFormattedAssistantText(text: String): AnnotatedString = buildAnnotatedString {
+    val codeBlockPattern = Regex("```(\\w+)?\\n?([\\s\\S]*?)```", RegexOption.MULTILINE)
+    val inlineCodePattern = Regex("`([^`]+)`")
     val numberedTitlePattern = Regex("""^(\d+\.\s+[^:]{1,80}:)(\s*.*)$""")
     val bulletTitlePattern = Regex("""^(-\s+[^:]{1,80}:)(\s*.*)$""")
     val stepPattern = Regex("""^(Step\s+\d+:)(\s*.*)$""", RegexOption.IGNORE_CASE)
     val sectionPattern = Regex("""^(Tips:|Common Mistakes:|Summary:)(\s*.*)$""", RegexOption.IGNORE_CASE)
     val genericSectionPattern = Regex("""^([A-Z][A-Za-z ]{1,30}:)(\s*.*)$""")
-    val lines = text.lines()
+    
+    var currentIndex = 0
+    
+    // Find and process code blocks first
+    codeBlockPattern.findAll(text).forEach { match ->
+        // Add text before code block
+        if (match.range.first > currentIndex) {
+            val beforeText = text.substring(currentIndex, match.range.first)
+            processNormalText(beforeText, numberedTitlePattern, bulletTitlePattern, stepPattern, sectionPattern, genericSectionPattern, inlineCodePattern)
+        }
+        
+        // Add code block with formatting
+        val language = match.groupValues[1].ifBlank { "code" }
+        val code = match.groupValues[2].trimEnd()
+        
+        append("\n")
+        withStyle(SpanStyle(
+            background = Color(0xFF1E1E1E),
+            color = Color(0xFF9CDCFE),
+            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+        )) {
+            if (language.isNotBlank()) {
+                withStyle(SpanStyle(
+                    color = Color(0xFF4EC9B0),
+                    fontWeight = FontWeight.Bold
+                )) {
+                    append("[$language]\n")
+                }
+            }
+            append(code)
+        }
+        append("\n")
+        
+        currentIndex = match.range.last + 1
+    }
+    
+    // Process remaining text after last code block
+    if (currentIndex < text.length) {
+        val remainingText = text.substring(currentIndex)
+        processNormalText(remainingText, numberedTitlePattern, bulletTitlePattern, stepPattern, sectionPattern, genericSectionPattern, inlineCodePattern)
+    }
+}
 
+private fun AnnotatedString.Builder.processNormalText(
+    text: String,
+    numberedTitlePattern: Regex,
+    bulletTitlePattern: Regex,
+    stepPattern: Regex,
+    sectionPattern: Regex,
+    genericSectionPattern: Regex,
+    inlineCodePattern: Regex
+) {
+    val lines = text.lines()
+    
     lines.forEachIndexed { index, rawLine ->
         val line = rawLine.trimEnd()
         when {
@@ -1075,37 +1165,63 @@ private fun buildFormattedAssistantText(text: String): AnnotatedString = buildAn
             numberedTitlePattern.matches(line) -> {
                 val match = numberedTitlePattern.find(line)!!
                 appendBoldSegment(match.groupValues[1])
-                append(match.groupValues[2])
+                processInlineCode(match.groupValues[2], inlineCodePattern)
             }
 
             bulletTitlePattern.matches(line) -> {
                 val match = bulletTitlePattern.find(line)!!
                 appendBoldSegment(match.groupValues[1])
-                append(match.groupValues[2])
+                processInlineCode(match.groupValues[2], inlineCodePattern)
             }
 
             stepPattern.matches(line) -> {
                 val match = stepPattern.find(line)!!
                 appendBoldSegment(match.groupValues[1])
-                append(match.groupValues[2])
+                processInlineCode(match.groupValues[2], inlineCodePattern)
             }
 
             sectionPattern.matches(line) -> {
                 val match = sectionPattern.find(line)!!
                 appendBoldSegment(match.groupValues[1])
-                append(match.groupValues[2])
+                processInlineCode(match.groupValues[2], inlineCodePattern)
             }
 
             genericSectionPattern.matches(line) -> {
                 val match = genericSectionPattern.find(line)!!
                 appendBoldSegment(match.groupValues[1])
-                append(match.groupValues[2])
+                processInlineCode(match.groupValues[2], inlineCodePattern)
             }
 
-            else -> append(line)
+            else -> processInlineCode(line, inlineCodePattern)
         }
 
         if (index < lines.lastIndex) append('\n')
+    }
+}
+
+private fun AnnotatedString.Builder.processInlineCode(text: String, inlineCodePattern: Regex) {
+    var currentIndex = 0
+    inlineCodePattern.findAll(text).forEach { match ->
+        // Add text before inline code
+        if (match.range.first > currentIndex) {
+            append(text.substring(currentIndex, match.range.first))
+        }
+        
+        // Add inline code with styling
+        withStyle(SpanStyle(
+            background = Color(0xFF2D2D2D),
+            color = Color(0xFFCE9178),
+            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+        )) {
+            append(match.groupValues[1])
+        }
+        
+        currentIndex = match.range.last + 1
+    }
+    
+    // Add remaining text
+    if (currentIndex < text.length) {
+        append(text.substring(currentIndex))
     }
 }
 
@@ -1561,7 +1677,7 @@ private fun PremiumModeSelectorSheet(
                 ResponseMode.DIRECT,
                 ResponseMode.ANSWER,
                 ResponseMode.EXPLAIN,
-                ResponseMode.NOTES,
+                ResponseMode.CODE,
                 ResponseMode.DIRECTION,
                 ResponseMode.CREATIVE,
                 ResponseMode.THEORY
@@ -2308,7 +2424,7 @@ private fun modeIcon(mode: ResponseMode): ImageVector = when (mode) {
     ResponseMode.DIRECT -> Icons.AutoMirrored.Rounded.Chat
     ResponseMode.ANSWER -> Icons.Rounded.TaskAlt
     ResponseMode.EXPLAIN -> Icons.Rounded.AutoStories
-    ResponseMode.NOTES -> Icons.AutoMirrored.Rounded.Notes
+    ResponseMode.CODE -> Icons.Rounded.Code
     ResponseMode.DIRECTION -> Icons.Rounded.Route
     ResponseMode.CREATIVE -> Icons.Rounded.Lightbulb
     ResponseMode.THEORY -> Icons.Rounded.Psychology
@@ -2318,7 +2434,7 @@ private fun modeDescription(mode: ResponseMode): String = when (mode) {
     ResponseMode.DIRECT -> "Quick and natural replies for fast back-and-forth conversation."
     ResponseMode.ANSWER -> "Clear answers first, followed by a short explanation and examples."
     ResponseMode.EXPLAIN -> "Teacher-style breakdown with step-by-step understanding."
-    ResponseMode.NOTES -> "Study-note format for revision, recall, and quick review."
+    ResponseMode.CODE -> "Write clean code, fix errors, and apply proper formatting with syntax highlighting."
     ResponseMode.DIRECTION -> "Guided approach focused on how to solve or attempt the problem."
     ResponseMode.CREATIVE -> "Memorable analogies, stories, and real-world connections."
     ResponseMode.THEORY -> "Deeper conceptual explanation with background and big-picture links."
@@ -2834,3 +2950,25 @@ private fun copyToClipboard(context: Context, text: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     clipboard.setPrimaryClip(ClipData.newPlainText("Algsoch", text))
 }
+
+// Data class for code block extraction
+private data class CodeBlock(
+    val code: String,
+    val language: String
+)
+
+// Helper function to extract first code block from text
+private fun extractFirstCodeBlock(text: String): CodeBlock? {
+    val codeBlockPattern = Regex("```(\\w+)?\\n?([\\s\\S]*?)```", RegexOption.MULTILINE)
+    val match = codeBlockPattern.find(text) ?: return null
+    
+    val language = match.groupValues[1].ifBlank { "code" }
+    val code = match.groupValues[2].trim()
+    
+    return if (code.isNotBlank()) {
+        CodeBlock(code, language)
+    } else {
+        null
+    }
+}
+

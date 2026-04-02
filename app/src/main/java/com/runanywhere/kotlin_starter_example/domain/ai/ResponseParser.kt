@@ -113,8 +113,8 @@ class ResponseParser {
             directAnswer = normalizeExplain(cleaned)
         )
 
-        ResponseMode.NOTES -> ParsedSections(
-            directAnswer = normalizeNotes(cleaned, userQuery)
+        ResponseMode.CODE -> ParsedSections(
+            directAnswer = normalizeCode(cleaned)
         )
 
         ResponseMode.DIRECTION -> ParsedSections(
@@ -128,6 +128,11 @@ class ResponseParser {
         ResponseMode.THEORY -> ParsedSections(
             directAnswer = limitParagraphs(cleaned, maxParagraphs = 4, maxChars = 1400)
         )
+    }
+
+    private fun normalizeCode(text: String): String {
+        // Keep code blocks intact, just ensure proper formatting
+        return text.trim()
     }
 
     private fun normalizeDirect(text: String): String {
