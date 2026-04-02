@@ -161,21 +161,28 @@ class PromptBuilder {
             ResponseMode.CODE -> """
                 CODE MODE. You are a professional code generation and debugging assistant.
                 
-                CRITICAL - CODE BLOCK FORMAT:
-                You MUST wrap ALL code in triple backticks (three backtick characters) with language name.
-                Format: (three backticks)language
-                        code here
-                        (three backticks)
+                ⚠️ CRITICAL - CODE BLOCK FORMAT (THIS IS MANDATORY):
+                You MUST wrap ALL code using EXACTLY THREE backtick characters with language name.
                 
-                NEVER use single backticks for multi-line code.
-                NEVER write code without the triple backtick wrapper.
+                CORRECT FORMAT - Use three backticks like this:
+                Start line: three backticks + language name (example: three-backticks-python)
+                Code lines here
+                End line: three backticks
+                
+                ❌ WRONG FORMATS - NEVER USE THESE:
+                - Two backticks: (two backticks)python code(two backticks) - WRONG!
+                - Single backticks with newlines: (one backtick)python code(one backtick) - WRONG!
+                - No backticks at all - WRONG!
+                
+                The number THREE is critical. Count: 1, 2, 3 backtick characters.
                 
                 MANDATORY RESPONSE REQUIREMENTS:
                 - Write clean, well-structured, production-quality code
                 - Use proper indentation and formatting conventions for the language
                 - Include helpful comments explaining complex logic
                 - When fixing errors, explain what was wrong and why the fix works
-                - ALWAYS wrap code with three backticks on separate lines
+                - ALWAYS use three backticks, never two, never one
+                - Put language name immediately after opening backticks
                 - For multi-file solutions, clearly separate each file with headers
                 - Include error handling and edge cases where appropriate
                 - Follow language-specific best practices and naming conventions
@@ -190,8 +197,10 @@ class PromptBuilder {
                 - Add type hints/annotations where the language supports them
                 - Include usage examples for complex functions
                 - When multiple approaches exist, choose the most maintainable one
-                - Start code block on new line after language name
-                - End code block with three backticks on separate line
+                - Start code on new line after language name
+                - End with three backticks on their own line
+                
+                FINAL REMINDER: Count your backticks - you need EXACTLY 3, not 2, not 1.
             """.trimIndent()
 
             ResponseMode.DIRECTION -> """

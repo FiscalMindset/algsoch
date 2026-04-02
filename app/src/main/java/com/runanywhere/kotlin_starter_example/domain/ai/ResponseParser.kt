@@ -37,6 +37,10 @@ class ResponseParser {
             .replace(Regex("[ \\t]{2,}"), " ")
             .replace(Regex("\\n{3,}"), "\n\n")
             .trim()
+        
+        // FIX: Convert double backticks to triple backticks for code blocks
+        // Pattern: ``language\ncode\n`` or ``code``
+        cleaned = fixBacktickCodeBlocks(cleaned)
 
         cleaned = cleanupMarkdownArtifacts(cleaned)
         cleaned = stripLeadingDisplayLabels(cleaned)
@@ -51,6 +55,76 @@ class ResponseParser {
         }
 
         return removeDanglingTail(cleaned)
+    }
+    
+    private fun fixBacktickCodeBlocks(text: String): String {
+        var fixed = text
+        
+        // Pattern 1: ``language\ncode\n`` (double backticks with language)
+        fixed = fixed.replace(Regex("``(\\w+)\\s*\\n([\\s\\S]*?)\\n``")) { match ->
+            val language = match.groupValues[1]
+            val code = match.groupValues[2]
+            "```$language\n$code\n```"
+        }
+        
+        // Pattern 2: ``code`` (double backticks without language, single or multi-line)
+        fixed = fixed.replace(Regex("``([\\s\\S]+?)``")) { match ->
+            val code = match.groupValues[1].trim()
+            // Detect if it's multi-line code
+            if (code.contains("\n")) {
+                // Try to detect language
+                val firstLine = code.lines().firstOrNull()?.trim() ?: ""
+                val language = detectLanguageFromCode(firstLine)
+                "```$language\n$code\n```"
+            } else {
+                // Single line - keep as inline code with single backticks
+                "`$code`"
+            }
+        }
+        
+        // Pattern 3: `language\ncode\n` (single backtick with newlines - should be triple)
+        fixed = fixed.replace(Regex("`(\\w+)\\s*\\n([\\s\\S]*?)\\n`")) { match ->
+            val language = match.groupValues[1]
+            val code = match.groupValues[2]
+            "```$language\n$code\n```"
+        }
+        
+        // Pattern 4: `multi\nline\ncode` (single backticks with multiple lines)
+        fixed = fixed.replace(Regex("`([^`]*\\n[^`]*\\n[^`]*)`")) { match ->
+            val code = match.groupValues[1].trim()
+            val firstLine = code.lines().firstOrNull()?.trim() ?: ""
+            val language = detectLanguageFromCode(firstLine)
+            "```$language\n$code\n```"
+        }
+        
+        return fixed
+    }
+    
+    private fun detectLanguageFromCode(firstLine: String): String {
+        return when {
+            firstLine.startsWith("def ") || firstLine.startsWith("class ") || 
+            firstLine.contains("print(") || firstLine.startsWith("import ") ||
+            firstLine.startsWith("from ") -> "python"
+            
+            firstLine.startsWith("function ") || firstLine.startsWith("const ") ||
+            firstLine.startsWith("let ") || firstLine.startsWith("var ") ||
+            firstLine.contains("=>") || firstLine.startsWith("async ") -> "javascript"
+            
+            firstLine.startsWith("public ") || firstLine.startsWith("private ") ||
+            firstLine.contains("void ") || firstLine.contains("static ") ||
+            firstLine.startsWith("package ") -> "java"
+            
+            firstLine.startsWith("func ") || firstLine.startsWith("val ") ||
+            firstLine.startsWith("var ") || firstLine.contains("->") -> "kotlin"
+            
+            firstLine.startsWith("#include") || firstLine.startsWith("int main") -> "cpp"
+            
+            firstLine.startsWith("<?php") -> "php"
+            
+            firstLine.startsWith("package main") || firstLine.startsWith("func main") -> "go"
+            
+            else -> "code"
+        }
     }
     
     fun parse(rawResponse: String, mode: ResponseMode, language: Language, userQuery: String? = null): StructuredResponse {
