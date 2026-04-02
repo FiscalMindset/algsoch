@@ -81,4 +81,3 @@ lint-baseline.xml
 
 # RunAnywhere downloaded models
 app/src/main/assets/models/
-**/models/
