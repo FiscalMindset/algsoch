@@ -34,13 +34,13 @@ class ResponseParser {
             .replace(Regex("(?i)lfm2?-?vl[\\w\\-]*"), "")
             .replace(Regex("(?i)<\\|vision_start\\|>.*?<\\|vision_end\\|>"), "")
             .replace(Regex("(?i)<vision>.*?</vision>", RegexOption.DOT_MATCHES_ALL), "")
-            .replace(Regex("[ \\t]{2,}"), " ")
-            .replace(Regex("\\n{3,}"), "\n\n")
             .trim()
         
         // FIX: Convert double backticks to triple backticks for code blocks
         // Pattern: ``language\ncode\n`` or ``code``
         cleaned = fixBacktickCodeBlocks(cleaned)
+        cleaned = normalizeFencedCodeBlocks(cleaned)
+        cleaned = normalizeWhitespaceOutsideCodeBlocks(cleaned)
 
         cleaned = cleanupMarkdownArtifacts(cleaned)
         cleaned = stripLeadingDisplayLabels(cleaned)
@@ -60,44 +60,218 @@ class ResponseParser {
     private fun fixBacktickCodeBlocks(text: String): String {
         var fixed = text
         
-        // Pattern 1: ``language\ncode\n`` (double backticks with language)
-        fixed = fixed.replace(Regex("``(\\w+)\\s*\\n([\\s\\S]*?)\\n``")) { match ->
+        // First, normalize any existing malformed code blocks
+        // Remove excessive backticks (4 or more) down to 3
+        fixed = fixed.replace(Regex("````+"), "```")
+        fixed = normalizeSplitFenceLines(fixed)
+        fixed = normalizeInlineFencedBlocks(fixed)
+        fixed = normalizeSplitFenceLines(fixed)
+        
+        // Pattern 1: ``code language\ncode\n`` (double backticks with potential language marker)
+        // This handles: ``code python\nvicky_kumar = "Vicky Kumar"\nprint(vicky_kumar)\n``
+        fixed = fixed.replace(Regex("(?<!`)``\\s*code\\s+(\\w+)\\s*\\n([\\s\\S]*?)\\n``(?!`)")) { match ->
             val language = match.groupValues[1]
-            val code = match.groupValues[2]
+            val code = match.groupValues[2].trim()
             "```$language\n$code\n```"
         }
         
-        // Pattern 2: ``code`` (double backticks without language, single or multi-line)
-        fixed = fixed.replace(Regex("``([\\s\\S]+?)``")) { match ->
+        // Pattern 2: ``language\ncode\n`` (double backticks with language)
+        fixed = fixed.replace(Regex("(?<!`)``\\s*(\\w+)\\s*\\n([\\s\\S]*?)``(?!`)")) { match ->
+            val language = match.groupValues[1]
+            val code = match.groupValues[2].trim()
+            "```$language\n$code\n```"
+        }
+        
+        // Pattern 3: ``\ncode\n`` (double backticks without language, multi-line)
+        fixed = fixed.replace(Regex("(?<!`)``\\s*\\n([\\s\\S]*?)\\n``(?!`)")) { match ->
             val code = match.groupValues[1].trim()
-            // Detect if it's multi-line code
+            val language = detectLanguageFromCode(code.lines().firstOrNull()?.trim() ?: "")
+            "```$language\n$code\n```"
+        }
+        
+        // Pattern 4: ``code`` (double backticks, potentially multi-line without explicit newlines at start/end)
+        fixed = fixed.replace(Regex("(?<!`)``([^`]+)``(?!`)")) { match ->
+            val code = match.groupValues[1].trim()
             if (code.contains("\n")) {
-                // Try to detect language
-                val firstLine = code.lines().firstOrNull()?.trim() ?: ""
-                val language = detectLanguageFromCode(firstLine)
+                // Multi-line code
+                val language = detectLanguageFromCode(code.lines().firstOrNull()?.trim() ?: "")
                 "```$language\n$code\n```"
             } else {
-                // Single line - keep as inline code with single backticks
+                // Single line - keep as inline code
                 "`$code`"
             }
         }
         
-        // Pattern 3: `language\ncode\n` (single backtick with newlines - should be triple)
-        fixed = fixed.replace(Regex("`(\\w+)\\s*\\n([\\s\\S]*?)\\n`")) { match ->
+        // Pattern 5: Single backtick with multi-line code (rare but possible)
+        fixed = fixed.replace(Regex("(?<!`)`(\\w+)\\s*\\n([\\s\\S]*?)\\n`(?!`)")) { match ->
             val language = match.groupValues[1]
-            val code = match.groupValues[2]
-            "```$language\n$code\n```"
-        }
-        
-        // Pattern 4: `multi\nline\ncode` (single backticks with multiple lines)
-        fixed = fixed.replace(Regex("`([^`]*\\n[^`]*\\n[^`]*)`")) { match ->
-            val code = match.groupValues[1].trim()
-            val firstLine = code.lines().firstOrNull()?.trim() ?: ""
-            val language = detectLanguageFromCode(firstLine)
+            val code = match.groupValues[2].trim()
             "```$language\n$code\n```"
         }
         
         return fixed
+    }
+
+    private fun normalizeSplitFenceLines(text: String): String {
+        val lines = text.lines()
+        if (lines.isEmpty()) return text
+
+        val rebuilt = mutableListOf<String>()
+        var index = 0
+
+        while (index < lines.size) {
+            val trimmed = lines[index].trim()
+            if (trimmed.matches(Regex("`+(?:\\s+`+)*"))) {
+                var totalBackticks = trimmed.count { it == '`' }
+                var endIndex = index
+
+                while (endIndex + 1 < lines.size) {
+                    val nextTrimmed = lines[endIndex + 1].trim()
+                    if (nextTrimmed.matches(Regex("`+(?:\\s+`+)*"))) {
+                        totalBackticks += nextTrimmed.count { it == '`' }
+                        endIndex += 1
+                    } else {
+                        break
+                    }
+                }
+
+                if (endIndex > index || totalBackticks >= 3) {
+                    rebuilt += if (totalBackticks >= 3) "```" else "`".repeat(totalBackticks)
+                    index = endIndex + 1
+                    continue
+                }
+            }
+
+            rebuilt += lines[index]
+            index += 1
+        }
+
+        return rebuilt.joinToString("\n")
+    }
+
+    private fun normalizeInlineFencedBlocks(text: String): String {
+        var normalized = text
+
+        normalized = normalized.replace(Regex("`{3,}(\\w+)[ \\t]+([^\\n][\\s\\S]*?)`{3,}")) { match ->
+            val language = match.groupValues[1]
+            val code = match.groupValues[2].trim()
+            "```$language\n$code\n```"
+        }
+
+        normalized = normalized.replace(Regex("`{3,}[ \\t]+([^\\n][\\s\\S]*?)`{3,}")) { match ->
+            val code = match.groupValues[1].trim()
+            val language = detectLanguageFromCode(code.substringBefore('\n').trim())
+            "```$language\n$code\n```"
+        }
+
+        normalized = normalized.replace(Regex("(?m)^`{4,}(\\w+)")) { match ->
+            "```${match.groupValues[1]}"
+        }
+        normalized = normalized.replace(Regex("(?m)^`{4,}$"), "```")
+
+        return normalized
+    }
+
+    private fun normalizeWhitespaceOutsideCodeBlocks(text: String): String =
+        transformOutsideCodeBlocks(text) { segment ->
+            segment
+                .replace(Regex("[ \\t]{2,}"), " ")
+                .replace(Regex("\\n{3,}"), "\n\n")
+        }.trim()
+
+    private fun normalizeFencedCodeBlocks(text: String): String =
+        transformCodeBlocks(text) { language, code ->
+            val detectedLanguage = if (language.isNotBlank()) {
+                language
+            } else {
+                detectLanguageFromCode(code.substringBefore('\n').trim())
+            }
+            val normalizedCode = normalizeCodeBlockContent(detectedLanguage, code)
+            val openingFence = if (detectedLanguage.isNotBlank() && detectedLanguage != "code") {
+                "```$detectedLanguage"
+            } else {
+                "```"
+            }
+            "$openingFence\n$normalizedCode\n```"
+        }
+
+    private fun transformOutsideCodeBlocks(text: String, transform: (String) -> String): String {
+        val fencedCodePattern = Regex("```[^\\n`]*\\n[\\s\\S]*?```", RegexOption.MULTILINE)
+        val rebuilt = StringBuilder()
+        var currentIndex = 0
+
+        fencedCodePattern.findAll(text).forEach { match ->
+            if (match.range.first > currentIndex) {
+                rebuilt.append(transform(text.substring(currentIndex, match.range.first)))
+            }
+            rebuilt.append(match.value)
+            currentIndex = match.range.last + 1
+        }
+
+        if (currentIndex < text.length) {
+            rebuilt.append(transform(text.substring(currentIndex)))
+        }
+
+        return rebuilt.toString()
+    }
+
+    private fun transformCodeBlocks(text: String, transform: (String, String) -> String): String {
+        val fencedCodePattern = Regex("```([^\\n`]*)\\n([\\s\\S]*?)```", RegexOption.MULTILINE)
+        val rebuilt = StringBuilder()
+        var currentIndex = 0
+
+        fencedCodePattern.findAll(text).forEach { match ->
+            if (match.range.first > currentIndex) {
+                rebuilt.append(text.substring(currentIndex, match.range.first))
+            }
+            rebuilt.append(transform(match.groupValues[1].trim(), match.groupValues[2].trim('\n')))
+            currentIndex = match.range.last + 1
+        }
+
+        if (currentIndex < text.length) {
+            rebuilt.append(text.substring(currentIndex))
+        }
+
+        return rebuilt.toString()
+    }
+
+    private fun normalizeCodeBlockContent(language: String, code: String): String =
+        when (language.lowercase()) {
+            "python", "py" -> reflowFlattenedPythonCode(code)
+            else -> code.trim('\n')
+        }
+
+    private fun reflowFlattenedPythonCode(code: String): String {
+        val trimmed = code.trim('\n')
+        val nonBlankLines = trimmed.lines().filter { it.isNotBlank() }
+        if (nonBlankLines.size > 1) return trimmed
+
+        val flattened = nonBlankLines.joinToString(" ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+        val looksFlattened = Regex("""\b(?:def|class)\s+\w+\s*\([^)]*\):\s+\S""").containsMatchIn(flattened) ||
+            (flattened.contains("print(") && flattened.contains("#")) ||
+            Regex("""\b(?:if|for|while)\b[^:]*:\s+\S""").containsMatchIn(flattened)
+
+        if (!looksFlattened) return trimmed
+
+        var formatted = flattened
+            .replace(Regex("""(\b(?:def|class)\s+\w+\s*\([^)]*\):)\s+"""), "$1\n    ")
+            .replace(Regex("""(\)\s+)#\s*([^#\n]+?)\s+(?=print\()"""), ")  # $2\n")
+            .replace(Regex("""(?<!\))\s+(#\s*Example\s+usage:)""", RegexOption.IGNORE_CASE), "\n\n$1")
+            .replace(Regex("""(?<!\))\s+(#)"""), "\n$1")
+            .replace(Regex("""(#[^\n]*:)\s+(?=print\()"""), "$1\n")
+            .replace(Regex("""\)\s+(?=print\()"""), ")\n")
+            .replace(Regex(""";\s*"""), "\n")
+            .replace(Regex("""\n{3,}"""), "\n\n")
+            .trim()
+
+        if (!formatted.contains('\n')) {
+            formatted = trimmed
+        }
+
+        return formatted
     }
     
     private fun detectLanguageFromCode(firstLine: String): String {
@@ -140,7 +314,11 @@ class ResponseParser {
             )
         }
 
-        val parsed = normalizeForMode(cleaned, mode, userQuery)
+        val parsed = if (containsFencedCodeBlock(cleaned)) {
+            ParsedSections(directAnswer = cleaned.trim())
+        } else {
+            normalizeForMode(cleaned, mode, userQuery)
+        }
 
         return StructuredResponse(
             directAnswer = parsed.directAnswer.ifBlank { cleaned },
@@ -150,6 +328,9 @@ class ResponseParser {
             language = language
         )
     }
+
+    private fun containsFencedCodeBlock(text: String): Boolean =
+        Regex("```[^\\n`]*\\n[\\s\\S]*?```", RegexOption.MULTILINE).containsMatchIn(text)
     
     fun parseReasoningSteps(rawResponse: String): List<ReasoningStep> {
         val steps = mutableListOf<ReasoningStep>()
@@ -205,41 +386,8 @@ class ResponseParser {
     }
 
     private fun normalizeCode(text: String): String {
-        // Fix common AI mistakes: convert single-backtick multi-line code to triple backticks
-        var fixed = text.trim()
-        
-        // Pattern: `language\ndef hello():\n    print("Hello")\n`
-        // Convert to: ```language\ndef hello():\n    print("Hello")\n```
-        val singleBacktickCodePattern = Regex("`(\\w+)\\s*\\n([\\s\\S]*?)\\n`")
-        fixed = singleBacktickCodePattern.replace(fixed) { matchResult ->
-            val language = matchResult.groupValues[1]
-            val code = matchResult.groupValues[2]
-            "```$language\n$code\n```"
-        }
-        
-        // Pattern: `def hello():\n    print("Hello")\n` (no language specified)
-        val singleBacktickNoLangPattern = Regex("`([\\s\\S]*?)\\n([\\s\\S]*?)\\n`")
-        if (fixed.contains("`") && fixed.contains("\n") && !fixed.contains("```")) {
-            // If we have backticks with newlines but no triple backticks, likely malformed
-            fixed = fixed.replace(Regex("`([^`]+\\n[^`]+)`")) { matchResult ->
-                val code = matchResult.groupValues[1]
-                // Try to detect language from first line
-                val firstLine = code.lines().firstOrNull()?.trim() ?: ""
-                val language = when {
-                    firstLine.startsWith("def ") || firstLine.startsWith("class ") || 
-                    firstLine.contains("print(") -> "python"
-                    firstLine.startsWith("function ") || firstLine.startsWith("const ") ||
-                    firstLine.startsWith("let ") || firstLine.startsWith("var ") -> "javascript"
-                    firstLine.startsWith("public ") || firstLine.startsWith("private ") ||
-                    firstLine.contains("void ") || firstLine.contains("class ") -> "java"
-                    firstLine.startsWith("func ") || firstLine.contains("->") -> "kotlin"
-                    else -> "code"
-                }
-                "```$language\n$code\n```"
-            }
-        }
-        
-        return fixed
+        // Just trim - backtick fixing is already done in sanitizeForDisplay
+        return text.trim()
     }
 
     private fun normalizeDirect(text: String): String {
@@ -503,19 +651,20 @@ class ResponseParser {
     }
 
     private fun cleanupMarkdownArtifacts(text: String): String {
-        val normalizedBullets = text.lines().joinToString("\n") { line ->
-            line
-                .replace(Regex("""^\s*[*•]\s+"""), "- ")
-                .replace(Regex("""^\s*#{1,6}\s*"""), "")
-        }
+        return transformOutsideCodeBlocks(text) { segment ->
+            val normalizedBullets = segment.lines().joinToString("\n") { line ->
+                line
+                    .replace(Regex("""^\s*[*•]\s+"""), "- ")
+                    .replace(Regex("""^\s*#{1,6}\s*"""), "")
+            }
 
-        return normalizedBullets
-            .replace(Regex("""\*\*(.+?)\*\*"""), "$1")
-            .replace(Regex("""__(.+?)__"""), "$1")
-            .replace(Regex("""`([^`]+)`"""), "$1")
-            .replace("**", "")
-            .replace("__", "")
-            .trim()
+            normalizedBullets
+                .replace(Regex("""\*\*(.+?)\*\*"""), "$1")
+                .replace(Regex("""__(.+?)__"""), "$1")
+                .replace(Regex("""`([^`\n]+)`"""), "$1")
+                .replace("**", "")
+                .replace("__", "")
+        }.trim()
     }
 
     private fun stripLeadingDisplayLabels(text: String): String {

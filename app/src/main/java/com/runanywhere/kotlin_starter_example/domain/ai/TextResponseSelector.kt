@@ -77,6 +77,7 @@ internal object TextResponseSelector {
                 val hasCodeBlock = cleaned.contains("```")
                 if (hasCodeBlock) score += 4.0 else score -= 3.0
                 if (normalized.length >= 50) score += 2.0
+                if (looksLikeFlatCodeBlock(cleaned)) score -= 4.0 else score += 1.5
             }
 
             ResponseMode.DIRECTION -> {
@@ -99,6 +100,31 @@ internal object TextResponseSelector {
 
         score -= truncationPenalty(normalized)
         return score
+    }
+
+    private fun looksLikeFlatCodeBlock(cleaned: String): Boolean {
+        val codeBlockPattern = Regex("```(\\w+)?\\n([\\s\\S]*?)```", RegexOption.MULTILINE)
+        return codeBlockPattern.findAll(cleaned).any { match ->
+            val language = match.groupValues[1].lowercase()
+            val code = match.groupValues[2].trim()
+            val nonBlankLines = code.lines().filter { it.isNotBlank() }
+
+            when (language) {
+                "python", "py" -> {
+                    nonBlankLines.any { line ->
+                        val trimmed = line.trimStart()
+                        !trimmed.startsWith("#") && (
+                            Regex(""":\s+\S""").containsMatchIn(trimmed) ||
+                                Regex("""\b(def|class|return|if|for|while|print|else|elif)\b""")
+                                    .findAll(trimmed)
+                                    .count() >= 2
+                            )
+                    }
+                }
+
+                else -> nonBlankLines.any { line -> line.count { it == ';' } >= 2 }
+            }
+        }
     }
 
     private fun truncationPenalty(text: String): Double {

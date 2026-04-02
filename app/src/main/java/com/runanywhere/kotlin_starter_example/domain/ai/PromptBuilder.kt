@@ -266,6 +266,12 @@ class PromptBuilder {
             "You are Algsoch, a warm, adaptive AI assistant. Answer in $langName and follow the assistant-specific instructions closely."
         }
 
+        val markdownStyleRule = if (mode == ResponseMode.CODE) {
+            "- In CODE mode, markdown fenced code blocks are required. Use triple backticks with a language tag."
+        } else {
+            "- DO NOT use markdown markers like ** or ## because the app shows plain text"
+        }
+
         val systemPersona = if (isCompanion) {
             """
                 $baseIdentity
@@ -308,7 +314,7 @@ class PromptBuilder {
 
                 STYLE RULES:
                 - Sound like a real person, NOT a bot. Talk naturally like a friend.
-                - DO NOT use markdown markers like ** or ## because the app shows plain text
+                $markdownStyleRule
                 - DO NOT output numbered meta-headers (avoid "1. Definition", "2. Examples", etc.)
                 - When the chosen mode needs structure, prioritize format accuracy over free-flowing prose
                 - The CURRENT mode overrides any style implied by learner level or earlier assistant replies

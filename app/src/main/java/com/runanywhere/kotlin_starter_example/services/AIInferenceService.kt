@@ -563,9 +563,34 @@ class AIInferenceService {
             ResponseMode.ANSWER -> isBrokenAnswerModeResponse(cleaned, sentenceCount)
             ResponseMode.EXPLAIN -> cleaned.length < 220 || sentenceCount < 4
             ResponseMode.THEORY -> cleaned.length < 320 || sentenceCount < 5
-            ResponseMode.CODE -> !cleaned.contains("```") || cleaned.length < 50
+            ResponseMode.CODE -> !cleaned.contains("```") || cleaned.length < 50 || looksLikeFlatCodeBlock(cleaned)
             ResponseMode.DIRECTION -> !Regex("(?im)^Step\\s+1:").containsMatchIn(cleaned)
             ResponseMode.CREATIVE -> cleaned.length < 220 || sentenceCount < 4
+        }
+    }
+
+    private fun looksLikeFlatCodeBlock(cleaned: String): Boolean {
+        val codeBlockPattern = Regex("```(\\w+)?\\n([\\s\\S]*?)```", RegexOption.MULTILINE)
+        return codeBlockPattern.findAll(cleaned).any { match ->
+            val language = match.groupValues[1].lowercase()
+            val code = match.groupValues[2].trim()
+            val nonBlankLines = code.lines().filter { it.isNotBlank() }
+
+            when (language) {
+                "python", "py" -> {
+                    nonBlankLines.any { line ->
+                        val trimmed = line.trimStart()
+                        !trimmed.startsWith("#") && (
+                            Regex(""":\s+\S""").containsMatchIn(trimmed) ||
+                                Regex("""\b(def|class|return|if|for|while|print|else|elif)\b""")
+                                    .findAll(trimmed)
+                                    .count() >= 2
+                            )
+                    }
+                }
+
+                else -> nonBlankLines.any { line -> line.count { it == ';' } >= 2 }
+            }
         }
     }
 

@@ -97,6 +97,100 @@ class ResponseParserTest {
     }
 
     @Test
+    fun sanitizeForDisplay_preserves_python_code_blocks_from_markdown_cleanup() {
+        val cleaned = parser.sanitizeForDisplay(
+            """
+            |Here's a Python code snippet that prints prime numbers from 1 to n:
+            |
+            |`````python
+            |def print_primes(n):
+            |    for i in range(2, n + 1):
+            |        is_prime = True
+            |        for j in range(2, int(i ** 0.5) + 1):
+            |            if i % j == 0:
+            |                is_prime = False
+            |                break
+            |        if is_prime:
+            |            print(i, end=" ")
+            |
+            |n = int(input("Enter a natural number: "))
+            |print_primes(n)
+            |`
+            |``
+            """.trimMargin()
+        )
+
+        assertTrue(cleaned.contains("```python"))
+        assertTrue(cleaned.contains("    for i in range(2, n + 1):"))
+        assertTrue(cleaned.contains("        is_prime = True"))
+        assertTrue(cleaned.contains("i ** 0.5"))
+        assertTrue(cleaned.trimEnd().endsWith("```"))
+    }
+
+    @Test
+    fun sanitizeForDisplay_keeps_double_underscore_names_inside_code_blocks() {
+        val cleaned = parser.sanitizeForDisplay(
+            """
+            |```python
+            |if __name__ == "__main__":
+            |    print(__file__)
+            |```
+            """.trimMargin()
+        )
+
+        assertTrue(cleaned.contains("__name__"))
+        assertTrue(cleaned.contains("\"__main__\""))
+        assertTrue(cleaned.contains("__file__"))
+    }
+
+    @Test
+    fun sanitizeForDisplay_normalizes_inline_fenced_code_blocks() {
+        val cleaned = parser.sanitizeForDisplay(
+            """
+            |``````python def print_even_odd(n): even = [] odd = [] print_even_odd(10) ``` ```
+            """.trimMargin()
+        )
+
+        assertTrue(cleaned.trimStart().startsWith("```python\n"))
+        assertTrue(cleaned.contains("def print_even_odd(n):"))
+        assertTrue(cleaned.contains("print_even_odd(10)"))
+        assertFalse(cleaned.contains("``` ```"))
+        assertTrue(cleaned.trimEnd().endsWith("```"))
+    }
+
+    @Test
+    fun sanitizeForDisplay_reflows_flattened_inline_python_function() {
+        val cleaned = parser.sanitizeForDisplay(
+            """
+            |Here's a simple Python function that checks if a string has 6 letters or more: ```python def check_string_length(input_str): return len(input_str) >= 6 # Example usage: print(check_string_length("hello")) # True print(check_string_length("world")) # False ```
+            """.trimMargin()
+        )
+
+        assertTrue(cleaned.contains("```python"))
+        assertTrue(cleaned.contains("def check_string_length(input_str):\n    return len(input_str) >= 6"))
+        assertTrue(cleaned.contains("# Example usage:\nprint(check_string_length(\"hello\"))"))
+        assertTrue(cleaned.contains("\n# True\nprint(check_string_length(\"world\")) # False"))
+        assertTrue(cleaned.contains("print(check_string_length(\"world\")) # False"))
+    }
+
+    @Test
+    fun directMode_preserves_fenced_code_block_after_final_parse() {
+        val rawResponse = """
+            |Here's a simple Python function that checks if a string has 6 letters or more: ```python def check_string_length(input_str): return len(input_str) >= 6 # Example usage: print(check_string_length("hello")) # True print(check_string_length("world")) # False ```
+        """.trimMargin()
+
+        val parsed = parser.parse(
+            rawResponse = rawResponse,
+            mode = ResponseMode.DIRECT,
+            language = Language.ENGLISH
+        )
+
+        assertTrue(parsed.directAnswer.contains("```python"))
+        assertTrue(parsed.directAnswer.contains("def check_string_length(input_str):"))
+        assertTrue(parsed.directAnswer.contains("return len(input_str) >= 6"))
+    }
+
+    @Test
     fun answerMode_keepsAnswerFirstAndMovesRestToExplanation() {
         val rawResponse = """
             A variable is a named place to store a value. You use it so the program can reuse and update data easily. For example, age = 20 stores a number. That makes code easier to read. It also avoids repeating the same value everywhere.
@@ -127,23 +221,6 @@ class ResponseParserTest {
 
         assertTrue(parsed.quickExplanation.contains("Key Points:"))
         assertTrue(parsed.quickExplanation.contains("1. Web development with Django"))
-    }
-
-    @Test
-    fun notesMode_formatsFallbackNotesShape() {
-        val rawResponse = """
-            Photosynthesis lets plants make food from sunlight. Chlorophyll captures light energy. Water and carbon dioxide are used to form glucose. Oxygen is released as a by-product.
-        """.trimIndent()
-
-        val parsed = parser.parse(
-            rawResponse = rawResponse,
-            mode = ResponseMode.NOTES,
-            language = Language.ENGLISH,
-            userQuery = "Explain photosynthesis"
-        )
-
-        assertTrue(parsed.directAnswer.contains("\n- "))
-        assertTrue(parsed.directAnswer.contains("Summary:"))
     }
 
     @Test

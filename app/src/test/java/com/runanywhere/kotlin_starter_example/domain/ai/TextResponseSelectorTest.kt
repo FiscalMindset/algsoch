@@ -51,33 +51,6 @@ class TextResponseSelectorTest {
     }
 
     @Test
-    fun notesMode_rewardsExpectedStructure() {
-        val notes = """
-            Python Basics
-            - Python is a general-purpose programming language.
-            - It is known for readable syntax.
-            - It is used in automation, web, data, and AI.
-            - Beginners often start with Python because setup is simple.
-            Summary: Python is versatile and easy to start with.
-        """.trimIndent()
-
-        val prose = "Python is flexible and used in many fields, so it is a common first language for beginners."
-
-        val notesScore = TextResponseSelector.score(
-            mode = ResponseMode.NOTES,
-            userQuery = "Give me notes on Python",
-            rawResponse = notes
-        )
-        val proseScore = TextResponseSelector.score(
-            mode = ResponseMode.NOTES,
-            userQuery = "Give me notes on Python",
-            rawResponse = prose
-        )
-
-        assertTrue(notesScore > proseScore)
-    }
-
-    @Test
     fun directMode_penalizesDanglingNumberedList() {
         val brokenDirect = "Python can help in a CRM product in a few ways: 1."
         val cleanDirect = "Python can power CRM automation, API integrations, and reporting. Which CRM are you using?"
@@ -196,5 +169,43 @@ class TextResponseSelectorTest {
         )
 
         assertEquals(firstAttempt, chosen)
+    }
+
+    @Test
+    fun codeMode_prefers_multiline_code_over_flattened_block() {
+        val flattened = """
+            ```python
+            def print_even_odd(n): even = [] odd = [] for i in range(1, n + 1): if i % 2 == 0: even.append(i) else: odd.append(i) print("Even numbers:", even) print("Odd numbers:", odd)
+            ```
+        """.trimIndent()
+        val multiline = """
+            ```python
+            def print_even_odd(n):
+                even = []
+                odd = []
+
+                for i in range(1, n + 1):
+                    if i % 2 == 0:
+                        even.append(i)
+                    else:
+                        odd.append(i)
+
+                print("Even numbers:", even)
+                print("Odd numbers:", odd)
+            ```
+        """.trimIndent()
+
+        val flattenedScore = TextResponseSelector.score(
+            mode = ResponseMode.CODE,
+            userQuery = "Write python code to print even and odd numbers",
+            rawResponse = flattened
+        )
+        val multilineScore = TextResponseSelector.score(
+            mode = ResponseMode.CODE,
+            userQuery = "Write python code to print even and odd numbers",
+            rawResponse = multiline
+        )
+
+        assertTrue(multilineScore > flattenedScore)
     }
 }

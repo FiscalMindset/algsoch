@@ -11,6 +11,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
@@ -40,6 +41,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -768,6 +770,7 @@ private fun MessageBubble(
 ) {
     val isUser = message.isUser
     val isMissingSavedReply = isMissingSavedReplyText(message.text)
+    var previewBlock by remember(message.id) { mutableStateOf<CodeBlock?>(null) }
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
@@ -872,60 +875,20 @@ private fun MessageBubble(
                                     message.text.ifBlank { "This reply has no visible text available." }
                                 }
                             }
-                            SelectionContainer {
-                                Text(
-                                    text = buildFormattedAssistantText(fullContent),
-                                    color = if (isMissingSavedReply) TextMuted else Color.White,
-                                    style = if (isMissingSavedReply) {
-                                        MaterialTheme.typography.bodySmall.copy(lineHeight = 20.sp)
-                                    } else {
-                                        MaterialTheme.typography.bodyMedium.copy(
-                                            fontSize = 16.sp,
-                                            lineHeight = 24.sp
-                                        )
-                                    },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 4.dp),
-                                    softWrap = true
-                                )
-                            }
-                            
-                            // Code Preview Button (if code block detected)
-                            val codeBlock = extractFirstCodeBlock(fullContent)
-                            if (codeBlock != null && codeBlock.language.lowercase() in listOf("html", "javascript", "js", "css")) {
-                                Spacer(Modifier.height(12.dp))
-                                var showCodePreview by remember { mutableStateOf(false) }
-                                
-                                Button(
-                                    onClick = { showCodePreview = true },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = AccentGreen.copy(alpha = 0.2f)
-                                    ),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(
-                                        Icons.Rounded.PlayArrow,
-                                        contentDescription = null,
-                                        tint = AccentGreen,
-                                        modifier = Modifier.size(20.dp)
+                            AssistantResponseContent(
+                                content = fullContent,
+                                textColor = if (isMissingSavedReply) TextMuted else Color.White,
+                                textStyle = if (isMissingSavedReply) {
+                                    MaterialTheme.typography.bodySmall.copy(lineHeight = 20.sp)
+                                } else {
+                                    MaterialTheme.typography.bodyMedium.copy(
+                                        fontSize = 16.sp,
+                                        lineHeight = 24.sp
                                     )
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(
-                                        "Run Code in Canvas",
-                                        color = AccentGreen,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                                
-                                if (showCodePreview) {
-                                    com.runanywhere.kotlin_starter_example.ui.components.CodePreviewCanvas(
-                                        code = codeBlock.code,
-                                        language = codeBlock.language,
-                                        onDismiss = { showCodePreview = false }
-                                    )
-                                }
-                            }
+                                },
+                                context = context,
+                                onPreviewCode = { previewBlock = it }
+                            )
 
                             Spacer(Modifier.height(16.dp))
                             HorizontalDivider(color = AccentBlue.copy(alpha = 0.2f), thickness = 1.dp)
@@ -987,14 +950,12 @@ private fun MessageBubble(
                             }
 
                             if (message.isPending) {
-                                Text(
-                                    text = buildFormattedAssistantText(displayText),
-                                    color = textColor,
-                                    style = textStyle,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 4.dp),
-                                    softWrap = true
+                                AssistantResponseContent(
+                                    content = displayText,
+                                    textColor = textColor,
+                                    textStyle = textStyle,
+                                    context = context,
+                                    onPreviewCode = { previewBlock = it }
                                 )
                                 Spacer(Modifier.height(16.dp))
                                 HorizontalDivider(color = AccentBlue.copy(alpha = 0.2f), thickness = 1.dp)
@@ -1010,17 +971,13 @@ private fun MessageBubble(
                                     TinyMetaChip(message.generationStatus ?: "Generating...")
                                 }
                             } else {
-                                SelectionContainer {
-                                    Text(
-                                        text = buildFormattedAssistantText(displayText),
-                                        color = textColor,
-                                        style = textStyle,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 4.dp),
-                                        softWrap = true
-                                    )
-                                }
+                                AssistantResponseContent(
+                                    content = displayText,
+                                    textColor = textColor,
+                                    textStyle = textStyle,
+                                    context = context,
+                                    onPreviewCode = { previewBlock = it }
+                                )
                             }
                         }
                     }
@@ -1046,7 +1003,193 @@ private fun MessageBubble(
                 }
             }
         }
+
+        previewBlock?.let { codeBlock ->
+            com.runanywhere.kotlin_starter_example.ui.components.CodePreviewCanvas(
+                code = codeBlock.code,
+                language = codeBlock.language,
+                onDismiss = { previewBlock = null }
+            )
+        }
     }
+}
+
+@Composable
+private fun AssistantResponseContent(
+    content: String,
+    textColor: Color,
+    textStyle: TextStyle,
+    context: Context,
+    onPreviewCode: (CodeBlock) -> Unit
+) {
+    val segments = remember(content) { parseAssistantContentSegments(content) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        segments.forEach { segment ->
+            when (segment) {
+                is AssistantContentSegment.Prose -> {
+                    val prose = segment.text.trim('\n')
+                    if (prose.isNotBlank()) {
+                        SelectionContainer {
+                            Text(
+                                text = buildFormattedAssistantText(prose),
+                                color = textColor,
+                                style = textStyle,
+                                modifier = Modifier.fillMaxWidth(),
+                                softWrap = true
+                            )
+                        }
+                    }
+                }
+
+                is AssistantContentSegment.Code -> {
+                    CodeBlockCard(
+                        codeBlock = segment.codeBlock,
+                        context = context,
+                        onPreviewCode = onPreviewCode
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CodeBlockCard(
+    codeBlock: CodeBlock,
+    context: Context,
+    onPreviewCode: (CodeBlock) -> Unit
+) {
+    val isPreviewable = codeBlock.language.lowercase() in listOf("html", "javascript", "js", "css")
+
+    Surface(
+        color = Color(0xFF101723),
+        shape = RoundedCornerShape(18.dp),
+        tonalElevation = 0.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, AccentBlue.copy(alpha = 0.18f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(Color(0xFF131F31), Color(0xFF0E1624))
+                        )
+                    )
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
+                    color = AccentBlue.copy(alpha = 0.16f),
+                    shape = RoundedCornerShape(999.dp)
+                ) {
+                    Text(
+                        text = codeBlock.language.ifBlank { "code" }.uppercase(Locale.getDefault()),
+                        color = AccentBlue,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                if (isPreviewable) {
+                    TextButton(onClick = { onPreviewCode(codeBlock) }) {
+                        Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Run", color = AccentGreen, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                TextButton(onClick = { copyToClipboard(context, codeBlock.code) }) {
+                    Icon(Icons.Rounded.ContentCopy, contentDescription = null, tint = AccentBlue, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Copy", color = AccentBlue, fontWeight = FontWeight.SemiBold)
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF0B111A))
+                    .horizontalScroll(rememberScrollState())
+            ) {
+                SelectionContainer {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp)
+                    ) {
+                        codeBlock.code.lines().forEachIndexed { index, line ->
+                            Row(verticalAlignment = Alignment.Top) {
+                                Text(
+                                    text = (index + 1).toString(),
+                                    color = TextMuted.copy(alpha = 0.78f),
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                    ),
+                                    textAlign = TextAlign.End,
+                                    modifier = Modifier.width(32.dp)
+                                )
+                                Spacer(Modifier.width(12.dp))
+                                Text(
+                                    text = buildHighlightedCodeLine(line),
+                                    color = Color(0xFF9CDCFE),
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                        fontSize = 14.sp,
+                                        lineHeight = 21.sp
+                                    ),
+                                    softWrap = false
+                                )
+                            }
+                            if (index < codeBlock.code.lines().lastIndex) {
+                                Spacer(Modifier.height(2.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private sealed class AssistantContentSegment {
+    data class Prose(val text: String) : AssistantContentSegment()
+    data class Code(val codeBlock: CodeBlock) : AssistantContentSegment()
+}
+
+private fun parseAssistantContentSegments(text: String): List<AssistantContentSegment> {
+    val codeBlockPattern = Regex("```(\\w+)?\\n([\\s\\S]*?)```", RegexOption.MULTILINE)
+    val segments = mutableListOf<AssistantContentSegment>()
+    var currentIndex = 0
+
+    codeBlockPattern.findAll(text).forEach { match ->
+        if (match.range.first > currentIndex) {
+            segments += AssistantContentSegment.Prose(text.substring(currentIndex, match.range.first))
+        }
+
+        val language = match.groupValues[1].ifBlank { "code" }
+        val code = match.groupValues[2].trimEnd()
+        segments += AssistantContentSegment.Code(CodeBlock(code = code, language = language))
+        currentIndex = match.range.last + 1
+    }
+
+    if (currentIndex < text.length) {
+        segments += AssistantContentSegment.Prose(text.substring(currentIndex))
+    }
+
+    return segments
+}
+
+private fun buildHighlightedCodeLine(line: String): AnnotatedString = buildAnnotatedString {
+    highlightCodeLine(line)
 }
 
 @Composable
@@ -3035,4 +3178,3 @@ private fun extractFirstCodeBlock(text: String): CodeBlock? {
         null
     }
 }
-
