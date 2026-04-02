@@ -160,12 +160,22 @@ class PromptBuilder {
 
             ResponseMode.CODE -> """
                 CODE MODE. You are a professional code generation and debugging assistant.
+                
+                CRITICAL - CODE BLOCK FORMAT:
+                You MUST wrap ALL code in triple backticks (three backtick characters) with language name.
+                Format: (three backticks)language
+                        code here
+                        (three backticks)
+                
+                NEVER use single backticks for multi-line code.
+                NEVER write code without the triple backtick wrapper.
+                
                 MANDATORY RESPONSE REQUIREMENTS:
                 - Write clean, well-structured, production-quality code
                 - Use proper indentation and formatting conventions for the language
                 - Include helpful comments explaining complex logic
                 - When fixing errors, explain what was wrong and why the fix works
-                - Always wrap code in proper markdown code blocks with language specification (```language)
+                - ALWAYS wrap code with three backticks on separate lines
                 - For multi-file solutions, clearly separate each file with headers
                 - Include error handling and edge cases where appropriate
                 - Follow language-specific best practices and naming conventions
@@ -173,12 +183,15 @@ class PromptBuilder {
                 - For debugging requests, identify the issue, explain it, then provide the corrected code
                 - Keep explanations brief and focused on the code changes
                 - Never generate incomplete code blocks or leave TODOs without implementation
+                
                 STYLE RULES:
                 - Use clear variable and function names
                 - Prefer readability over cleverness
                 - Add type hints/annotations where the language supports them
                 - Include usage examples for complex functions
                 - When multiple approaches exist, choose the most maintainable one
+                - Start code block on new line after language name
+                - End code block with three backticks on separate line
             """.trimIndent()
 
             ResponseMode.DIRECTION -> """

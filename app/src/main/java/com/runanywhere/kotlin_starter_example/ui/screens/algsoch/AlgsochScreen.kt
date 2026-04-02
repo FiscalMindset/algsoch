@@ -1097,8 +1097,8 @@ private fun SenderBadge(label: String, isUser: Boolean) {
 }
 
 private fun buildFormattedAssistantText(text: String): AnnotatedString = buildAnnotatedString {
-    val codeBlockPattern = Regex("```(\\w+)?\\n?([\\s\\S]*?)```", RegexOption.MULTILINE)
-    val inlineCodePattern = Regex("`([^`]+)`")
+    val codeBlockPattern = Regex("```(\\w+)?\\n([\\s\\S]*?)```", RegexOption.MULTILINE)
+    val inlineCodePattern = Regex("`([^`\n]+)`")
     val numberedTitlePattern = Regex("""^(\d+\.\s+[^:]{1,80}:)(\s*.*)$""")
     val bulletTitlePattern = Regex("""^(-\s+[^:]{1,80}:)(\s*.*)$""")
     val stepPattern = Regex("""^(Step\s+\d+:)(\s*.*)$""", RegexOption.IGNORE_CASE)
@@ -1106,34 +1106,46 @@ private fun buildFormattedAssistantText(text: String): AnnotatedString = buildAn
     val genericSectionPattern = Regex("""^([A-Z][A-Za-z ]{1,30}:)(\s*.*)$""")
     
     var currentIndex = 0
+    val codeBlocks = codeBlockPattern.findAll(text).toList()
     
-    // Find and process code blocks first
-    codeBlockPattern.findAll(text).forEach { match ->
+    // Process text with code blocks
+    codeBlocks.forEach { match ->
         // Add text before code block
         if (match.range.first > currentIndex) {
             val beforeText = text.substring(currentIndex, match.range.first)
             processNormalText(beforeText, numberedTitlePattern, bulletTitlePattern, stepPattern, sectionPattern, genericSectionPattern, inlineCodePattern)
         }
         
-        // Add code block with formatting
+        // Add code block with IDE-like syntax highlighting
         val language = match.groupValues[1].ifBlank { "code" }
         val code = match.groupValues[2].trimEnd()
         
-        append("\n")
+        append("\n\n")
+        
+        // Language label
+        if (language.isNotBlank()) {
+            withStyle(SpanStyle(
+                color = Color(0xFF569CD6),  // Blue like VS Code
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp,
+                background = Color(0xFF1E1E1E)
+            )) {
+                append("  $language  ")
+            }
+            append("\n")
+        }
+        
+        // Code content with syntax highlighting
         withStyle(SpanStyle(
             background = Color(0xFF1E1E1E),
-            color = Color(0xFF9CDCFE),
             fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
         )) {
-            if (language.isNotBlank()) {
-                withStyle(SpanStyle(
-                    color = Color(0xFF4EC9B0),
-                    fontWeight = FontWeight.Bold
-                )) {
-                    append("[$language]\n")
-                }
+            val lines = code.lines()
+            lines.forEachIndexed { index, line ->
+                // Add syntax highlighting based on common patterns
+                highlightCodeLine(line)
+                if (index < lines.lastIndex) append('\n')
             }
-            append(code)
         }
         append("\n")
         
@@ -1144,6 +1156,57 @@ private fun buildFormattedAssistantText(text: String): AnnotatedString = buildAn
     if (currentIndex < text.length) {
         val remainingText = text.substring(currentIndex)
         processNormalText(remainingText, numberedTitlePattern, bulletTitlePattern, stepPattern, sectionPattern, genericSectionPattern, inlineCodePattern)
+    }
+}
+
+private fun AnnotatedString.Builder.highlightCodeLine(line: String) {
+    // Keywords (Python, JavaScript, Java, etc.)
+    val keywordPattern = Regex("\\b(def|class|return|if|else|elif|for|while|import|from|function|const|let|var|async|await|public|private|void|int|String)\\b")
+    // Strings
+    val stringPattern = Regex("\"([^\"]*)\"|'([^']*)'")
+    // Comments
+    val commentPattern = Regex("(#.*$|//.*$)")
+    // Function calls
+    val functionPattern = Regex("\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\(")
+    // Numbers
+    val numberPattern = Regex("\\b\\d+\\.?\\d*\\b")
+    
+    var currentPos = 0
+    val segments = mutableListOf<Pair<IntRange, SpanStyle?>>()
+    
+    // Find all patterns
+    commentPattern.find(line)?.let { segments.add(it.range to SpanStyle(color = Color(0xFF6A9955))) }
+    stringPattern.findAll(line).forEach { segments.add(it.range to SpanStyle(color = Color(0xFFCE9178))) }
+    keywordPattern.findAll(line).forEach { segments.add(it.range to SpanStyle(color = Color(0xFF569CD6), fontWeight = FontWeight.Bold)) }
+    functionPattern.findAll(line).forEach { 
+        val nameRange = IntRange(it.groups[1]!!.range.first, it.groups[1]!!.range.last)
+        segments.add(nameRange to SpanStyle(color = Color(0xFFDCDCAA))) 
+    }
+    numberPattern.findAll(line).forEach { segments.add(it.range to SpanStyle(color = Color(0xFFB5CEA8))) }
+    
+    // Sort segments by position
+    val sortedSegments = segments.sortedBy { it.first.first }
+    
+    // Apply highlighting
+    sortedSegments.forEach { (range, style) ->
+        if (range.first > currentPos) {
+            withStyle(SpanStyle(color = Color(0xFF9CDCFE))) {
+                append(line.substring(currentPos, range.first))
+            }
+        }
+        if (style != null) {
+            withStyle(style) {
+                append(line.substring(range.first, range.last + 1))
+            }
+        }
+        currentPos = range.last + 1
+    }
+    
+    // Append remaining text
+    if (currentPos < line.length) {
+        withStyle(SpanStyle(color = Color(0xFF9CDCFE))) {
+            append(line.substring(currentPos))
+        }
     }
 }
 
@@ -1207,13 +1270,14 @@ private fun AnnotatedString.Builder.processInlineCode(text: String, inlineCodePa
             append(text.substring(currentIndex, match.range.first))
         }
         
-        // Add inline code with styling
+        // Add inline code with subtle styling (not orange, more subtle)
         withStyle(SpanStyle(
-            background = Color(0xFF2D2D2D),
-            color = Color(0xFFCE9178),
-            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+            background = Color(0xFF2A2A2A),
+            color = Color(0xFFD4D4D4),
+            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+            fontSize = 14.sp
         )) {
-            append(match.groupValues[1])
+            append(" ${match.groupValues[1]} ")
         }
         
         currentIndex = match.range.last + 1

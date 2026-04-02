@@ -122,22 +122,56 @@ class ResponseParser {
         )
 
         ResponseMode.CREATIVE -> ParsedSections(
-            directAnswer = limitSentences(cleaned, maxSentences = 6, maxChars = 760)
+            directAnswer = cleaned.trim()  // No limits
         )
 
         ResponseMode.THEORY -> ParsedSections(
-            directAnswer = limitParagraphs(cleaned, maxParagraphs = 4, maxChars = 1400)
+            directAnswer = cleaned.trim()  // No limits
         )
     }
 
     private fun normalizeCode(text: String): String {
-        // Keep code blocks intact, just ensure proper formatting
-        return text.trim()
+        // Fix common AI mistakes: convert single-backtick multi-line code to triple backticks
+        var fixed = text.trim()
+        
+        // Pattern: `language\ndef hello():\n    print("Hello")\n`
+        // Convert to: ```language\ndef hello():\n    print("Hello")\n```
+        val singleBacktickCodePattern = Regex("`(\\w+)\\s*\\n([\\s\\S]*?)\\n`")
+        fixed = singleBacktickCodePattern.replace(fixed) { matchResult ->
+            val language = matchResult.groupValues[1]
+            val code = matchResult.groupValues[2]
+            "```$language\n$code\n```"
+        }
+        
+        // Pattern: `def hello():\n    print("Hello")\n` (no language specified)
+        val singleBacktickNoLangPattern = Regex("`([\\s\\S]*?)\\n([\\s\\S]*?)\\n`")
+        if (fixed.contains("`") && fixed.contains("\n") && !fixed.contains("```")) {
+            // If we have backticks with newlines but no triple backticks, likely malformed
+            fixed = fixed.replace(Regex("`([^`]+\\n[^`]+)`")) { matchResult ->
+                val code = matchResult.groupValues[1]
+                // Try to detect language from first line
+                val firstLine = code.lines().firstOrNull()?.trim() ?: ""
+                val language = when {
+                    firstLine.startsWith("def ") || firstLine.startsWith("class ") || 
+                    firstLine.contains("print(") -> "python"
+                    firstLine.startsWith("function ") || firstLine.startsWith("const ") ||
+                    firstLine.startsWith("let ") || firstLine.startsWith("var ") -> "javascript"
+                    firstLine.startsWith("public ") || firstLine.startsWith("private ") ||
+                    firstLine.contains("void ") || firstLine.contains("class ") -> "java"
+                    firstLine.startsWith("func ") || firstLine.contains("->") -> "kotlin"
+                    else -> "code"
+                }
+                "```$language\n$code\n```"
+            }
+        }
+        
+        return fixed
     }
 
     private fun normalizeDirect(text: String): String {
         val flattened = collapseBrokenListLeadIn(flattenForProse(text))
-        return limitSentences(flattened, maxSentences = 3, maxChars = 240)
+        // No limits - let the full response through
+        return flattened.trim()
     }
 
     private fun normalizeAnswer(text: String): ParsedSections {
