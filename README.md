@@ -130,7 +130,7 @@ Algsoch adapts to your unique learning style with 7 powerful modes:
 
 ### Download
 
-**[Download Algsoch APK (v1.0.0)](https://github.com/FiscalMindset/algsoch/releases)**
+**[Download Algsoch APK (v1.0.4)](https://github.com/FiscalMindset/algsoch/releases)**
 
 All 7 learning modes enabled and ready to use.
 
