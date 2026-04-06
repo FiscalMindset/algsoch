@@ -8,6 +8,8 @@ import com.runanywhere.kotlin_starter_example.data.models.enums.ResponseMode
 import com.runanywhere.kotlin_starter_example.domain.models.GenerationTraceEntry
 import com.runanywhere.kotlin_starter_example.domain.models.StructuredResponse
 import com.runanywhere.kotlin_starter_example.ui.screens.algsoch.ChatMessage
+import com.runanywhere.kotlin_starter_example.ui.screens.algsoch.ImageAnalysisStep
+import com.runanywhere.kotlin_starter_example.ui.screens.algsoch.ImageAnalysisTrace
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -328,6 +330,7 @@ internal object ChatHistoryJsonCodec {
                     put("isUser", message.isUser)
                     put("text", messageTextForStorage(message))
                     put("imageUri", message.imageUri?.toString() ?: JSONObject.NULL)
+                    put("imageAnalysisTrace", message.imageAnalysisTrace?.toJson() ?: JSONObject.NULL)
                     put("assistantLabel", message.assistantLabel ?: JSONObject.NULL)
                     put("feedbackType", message.feedbackType?.name ?: JSONObject.NULL)
                     message.structuredResponse?.let { response ->
@@ -389,6 +392,7 @@ internal object ChatHistoryJsonCodec {
                             isUser = isUser,
                             timestamp = timestamp,
                             imageUri = parseImageUri(jsonObject.optNullableString("imageUri")),
+                            imageAnalysisTrace = jsonObject.optJSONObject("imageAnalysisTrace")?.toImageAnalysisTrace(),
                             feedbackType = parseFeedbackType(jsonObject.optNullableString("feedbackType")),
                             assistantLabel = jsonObject.optNullableString("assistantLabel"),
                             structuredResponse = structuredResponse
@@ -427,6 +431,70 @@ internal object ChatHistoryJsonCodec {
 
     private fun JSONObject.optNullableString(key: String): String? =
         if (isNull(key)) null else optString(key).takeIf { it.isNotBlank() }
+
+    private fun ImageAnalysisTrace.toJson(): JSONObject =
+        JSONObject().apply {
+            put("sourceLabel", sourceLabel)
+            put("focusModeLabel", focusModeLabel)
+            put("mimeType", mimeType ?: JSONObject.NULL)
+            put("analyzedImageUri", analyzedImageUri?.toString() ?: JSONObject.NULL)
+            put("originalWidth", originalWidth)
+            put("originalHeight", originalHeight)
+            put("processedWidth", processedWidth)
+            put("processedHeight", processedHeight)
+            put("originalSizeBytes", originalSizeBytes)
+            put("processedSizeBytes", processedSizeBytes)
+            put("preprocessingApplied", preprocessingApplied)
+            put("preprocessingSummary", preprocessingSummary)
+            put("analysisSummary", analysisSummary)
+            put("previewNote", previewNote)
+            put(
+                "steps",
+                JSONArray().apply {
+                    steps.forEach { step ->
+                        put(
+                            JSONObject().apply {
+                                put("title", step.title)
+                                put("description", step.description)
+                                put("wasApplied", step.wasApplied)
+                            }
+                        )
+                    }
+                }
+            )
+        }
+
+    private fun JSONObject.toImageAnalysisTrace(): ImageAnalysisTrace =
+        ImageAnalysisTrace(
+            sourceLabel = optString("sourceLabel"),
+            focusModeLabel = optNullableString("focusModeLabel") ?: "Full frame",
+            mimeType = optNullableString("mimeType"),
+            analyzedImageUri = parseImageUri(optNullableString("analyzedImageUri")),
+            originalWidth = optInt("originalWidth", 0),
+            originalHeight = optInt("originalHeight", 0),
+            processedWidth = optInt("processedWidth", 0),
+            processedHeight = optInt("processedHeight", 0),
+            originalSizeBytes = optLong("originalSizeBytes", 0L),
+            processedSizeBytes = optLong("processedSizeBytes", 0L),
+            preprocessingApplied = optBoolean("preprocessingApplied", false),
+            preprocessingSummary = optString("preprocessingSummary"),
+            analysisSummary = optString("analysisSummary"),
+            previewNote = optString("previewNote"),
+            steps = optJSONArray("steps")?.let { stepsArray ->
+                buildList {
+                    for (index in 0 until stepsArray.length()) {
+                        val step = stepsArray.optJSONObject(index) ?: continue
+                        add(
+                            ImageAnalysisStep(
+                                title = step.optString("title"),
+                                description = step.optString("description"),
+                                wasApplied = step.optBoolean("wasApplied", true)
+                            )
+                        )
+                    }
+                }
+            }.orEmpty()
+        )
 
     private fun JSONObject.optNullableLong(key: String): Long? =
         if (isNull(key)) null else optLong(key)

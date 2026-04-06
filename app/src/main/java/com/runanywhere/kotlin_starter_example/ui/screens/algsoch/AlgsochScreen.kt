@@ -88,17 +88,24 @@ fun AlgsochScreen(
     
     // Image selection state
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
+    var selectedImageFocusMode by remember { mutableStateOf(ImageFocusMode.FULL_FRAME) }
     
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         selectedImageUri = uri
+        if (uri != null) {
+            selectedImageFocusMode = ImageFocusMode.FULL_FRAME
+        }
     }
 
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicturePreview()
     ) { bitmap ->
         selectedImageUri = bitmap?.let { saveCapturedBitmapToCache(context, it) } ?: selectedImageUri
+        if (bitmap != null) {
+            selectedImageFocusMode = ImageFocusMode.FULL_FRAME
+        }
     }
 
     LaunchedEffect(initialAssistantId) {
@@ -156,7 +163,9 @@ fun AlgsochScreen(
                                         userQuery = userMsg.text,
                                         response = structuredResponse,
                                         responseText = structuredResponse.toDisplayText(),
-                                        assistantLabel = message.assistantLabel
+                                        assistantLabel = message.assistantLabel,
+                                        imageUri = userMsg.imageUri ?: message.imageUri,
+                                        imageAnalysisTrace = userMsg.imageAnalysisTrace ?: message.imageAnalysisTrace
                                     )
                                 }
                             }
@@ -175,9 +184,15 @@ fun AlgsochScreen(
                     onSend = {
                         focusManager.clearFocus(force = true)
                         keyboardController?.hide()
-                        viewModel.sendMessage(inputText, selectedImageUri, modelService.isVLMLoaded)
+                        viewModel.sendMessage(
+                            query = inputText,
+                            imageUri = selectedImageUri,
+                            imageFocusMode = selectedImageFocusMode,
+                            isVisionReady = modelService.isVLMLoaded
+                        )
                         inputText = ""
                         selectedImageUri = null
+                        selectedImageFocusMode = ImageFocusMode.FULL_FRAME
                     },
                     onCancel = { viewModel.cancelGeneration() },
                     onImageClick = { showImageSourceSheet = true },
@@ -185,7 +200,12 @@ fun AlgsochScreen(
                     selectedMode = viewModel.selectedCustomMode?.name ?: viewModel.selectedMode.displayName(),
                     isGenerating = viewModel.isGenerating,
                     selectedImageUri = selectedImageUri,
-                    onClearImage = { selectedImageUri = null },
+                    selectedImageFocusMode = selectedImageFocusMode,
+                    onImageFocusModeChange = { selectedImageFocusMode = it },
+                    onClearImage = {
+                        selectedImageUri = null
+                        selectedImageFocusMode = ImageFocusMode.FULL_FRAME
+                    },
                     isChatReady = modelService.isLLMLoaded,
                     isChatDownloaded = modelService.isLLMDownloaded,
                     isChatLoading = modelService.isLLMLoading || modelService.isLLMDownloading,
@@ -624,6 +644,8 @@ private fun UnifiedInputBar(
     selectedMode: String,
     isGenerating: Boolean,
     selectedImageUri: Uri?,
+    selectedImageFocusMode: ImageFocusMode,
+    onImageFocusModeChange: (ImageFocusMode) -> Unit,
     onClearImage: () -> Unit,
     isChatReady: Boolean,
     isChatDownloaded: Boolean,
@@ -726,28 +748,61 @@ private fun UnifiedInputBar(
 
         // Image preview if selected
         selectedImageUri?.let { uri ->
-            Box(modifier = Modifier.padding(bottom = 12.dp)) {
-                Surface(
-                    modifier = Modifier.size(80.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    color = BackgroundDark
-                ) {
-                    AsyncImage(
-                        model = uri,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
+            Column(
+                modifier = Modifier.padding(bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box {
+                    Surface(
+                        modifier = Modifier.size(80.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        color = BackgroundDark
+                    ) {
+                        AsyncImage(
+                            model = uri,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    IconButton(
+                        onClick = onClearImage,
+                        modifier = Modifier
+                            .size(24.dp)
+                            .offset(x = 64.dp, y = (-8).dp)
+                            .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                    ) {
+                        Icon(Icons.Rounded.Close, null, tint = Color.White, modifier = Modifier.size(14.dp))
+                    }
                 }
-                IconButton(
-                    onClick = onClearImage,
+
+                Text(
+                    text = "Vision focus",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = AccentBlue,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Row(
                     modifier = Modifier
-                        .size(24.dp)
-                        .offset(x = 64.dp, y = (-8).dp)
-                        .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Rounded.Close, null, tint = Color.White, modifier = Modifier.size(14.dp))
+                    ImageFocusMode.entries.forEach { focusMode ->
+                        TinyMetaChip(
+                            label = focusMode.displayName,
+                            textColor = if (selectedImageFocusMode == focusMode) AccentBlue else TextMuted,
+                            borderColor = if (selectedImageFocusMode == focusMode) AccentBlue.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.12f),
+                            onClick = { onImageFocusModeChange(focusMode) }
+                        )
+                    }
                 }
+                Text(
+                    text = selectedImageFocusMode.shortDescription,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
             }
         }
 
@@ -947,6 +1002,57 @@ private fun MessageBubble(
                                         fontWeight = FontWeight.Bold,
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                                     )
+                                }
+                                message.imageAnalysisTrace?.let { trace ->
+                                    Surface(
+                                        color = SurfaceSecondary,
+                                        shape = RoundedCornerShape(16.dp),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, AccentBlue.copy(alpha = 0.14f))
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text(
+                                                text = "Vision pipeline",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = AccentBlue,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                TinyMetaChip(
+                                                    label = if (trace.preprocessingApplied) "Optimized copy" else "Original copy",
+                                                    textColor = AccentBlue,
+                                                    borderColor = AccentBlue.copy(alpha = 0.28f)
+                                                )
+                                                TinyMetaChip(
+                                                    label = trace.focusModeLabel,
+                                                    textColor = AccentOrange,
+                                                    borderColor = AccentOrange.copy(alpha = 0.28f)
+                                                )
+                                                trace.mimeType?.takeIf { it.isNotBlank() }?.let { mimeType ->
+                                                    TinyMetaChip(mimeType.substringAfterLast('/'))
+                                                }
+                                            }
+                                            Text(
+                                                text = trace.analysisSummary,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = TextSecondary,
+                                                lineHeight = 18.sp
+                                            )
+                                            trace.preprocessingSummary.takeIf { it.isNotBlank() }?.let { summary ->
+                                                Text(
+                                                    text = summary,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = TextMuted,
+                                                    lineHeight = 18.sp
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                                 Surface(
                                     color = SurfaceSecondary,
@@ -2220,29 +2326,72 @@ private fun PremiumAnalyticsDialog(
     onDismiss: () -> Unit
 ) {
     val totalQuestions = (data["totalQuestions"] as? Number)?.toInt() ?: 0
+    val totalResponses = (data["totalResponses"] as? Number)?.toInt() ?: 0
     val totalSessions = ((data["totalSessions"] ?: data["totalConversations"]) as? Number)?.toInt() ?: 0
     val totalMessages = (data["totalMessages"] as? Number)?.toInt() ?: 0
     val totalTokens = (data["totalTokens"] as? Number)?.toInt() ?: 0
+    val avgTokensPerResponse = (data["avgTokensPerResponse"] as? Number)?.toDouble() ?: 0.0
+    val feedbackCoveragePercent = (data["feedbackCoveragePercent"] as? Number)?.toInt() ?: 0
     val topicsCovered = (data["topicsCovered"] as? Number)?.toInt() ?: 0
     val timeSpentMinutes = (data["timeSpentMinutes"] as? Number)?.toInt() ?: 0
     val avgResponseTimeMs = (data["avgResponseTime"] as? Number)?.toLong() ?: 0L
+    val avgTimeToFirstTokenMs = (data["avgTimeToFirstTokenMs"] as? Number)?.toLong() ?: 0L
     val activeDays = (data["activeDays"] as? Number)?.toInt() ?: 0
     val currentStudyStreak = (data["currentStudyStreak"] as? Number)?.toInt() ?: 0
     val longestStudyStreak = (data["longestStudyStreak"] as? Number)?.toInt() ?: 0
     val questionsThisWeek = (data["questionsThisWeek"] as? Number)?.toInt() ?: 0
+    val previousWeekQuestions = (data["previousWeekQuestions"] as? Number)?.toInt() ?: 0
     val avgQuestionsPerActiveDay = (data["avgQuestionsPerActiveDay"] as? Number)?.toDouble() ?: 0.0
     val avgMessagesPerSession = (data["avgMessagesPerSession"] as? Number)?.toDouble() ?: 0.0
     val peakStudyWindow = data["peakStudyWindow"]?.toString()?.takeUnless { it.isBlank() || it == "null" } ?: "No data yet"
     val topTopic = data["topTopic"]?.toString()?.takeUnless { it.isBlank() || it == "null" } ?: "General Learning"
     val preferredMode = data["preferredMode"]?.toString()?.takeUnless { it.isBlank() || it == "null" } ?: "Answer"
+    val bestRatedMode = data["bestRatedMode"]?.toString()?.takeUnless { it.isBlank() || it == "null" }
     val preferredLanguage = data["preferredLanguage"]?.toString()?.takeUnless { it.isBlank() || it == "null" } ?: "English"
     val preferredLevel = data["preferredLevel"]?.toString()?.takeUnless { it.isBlank() || it == "null" } ?: "Smart"
+    val visionQuestions = (data["visionQuestions"] as? Number)?.toInt() ?: 0
+    val visionSharePercent = (data["visionSharePercent"] as? Number)?.toInt() ?: 0
+    val studyConsistencyPercent = (data["studyConsistencyPercent"] as? Number)?.toInt() ?: 0
+    val modeVariety = (data["modeVariety"] as? Number)?.toInt() ?: 0
+    val modelVariety = (data["modelVariety"] as? Number)?.toInt() ?: 0
     val topicInsights = (data["topicInsights"] as? List<*>)?.mapNotNull { it as? TopicInsight }.orEmpty()
+    val analyticsInsights = (data["insights"] as? List<*>)?.mapNotNull { it as? AnalyticsInsightItem }.orEmpty()
     val topicsList = (data["topicsList"] as? List<*>)?.mapNotNull { it?.toString()?.takeIf(String::isNotBlank) }.orEmpty()
+    val recentActivity = (data["recentActivity"] as? List<*>)?.mapNotNull { it as? DailyActivityPoint }.orEmpty()
+    val modeBreakdown = (data["modeBreakdown"] as? List<*>)?.mapNotNull { it as? AnalyticsBreakdownItem }.orEmpty()
+    val modelBreakdown = (data["modelBreakdown"] as? List<*>)?.mapNotNull { item ->
+        (item as? AnalyticsBreakdownItem)?.let { breakdownItem ->
+            breakdownItem.copy(label = displayModelName(breakdownItem.label))
+        }
+    }.orEmpty()
+    val feedbackBreakdown = (data["feedbackBreakdown"] as? List<*>)?.mapNotNull { it as? AnalyticsBreakdownItem }.orEmpty()
     val writingStyle = data["writingStyle"] as? Map<*, *>
     val queryStyle = writingStyle?.get("queryStyle")?.toString()?.takeUnless { it.isBlank() || it == "null" } ?: "Balanced"
     val avgQueryLength = (writingStyle?.get("avgQueryLength") as? Number)?.toDouble() ?: 0.0
     val questionsPerSession = if (totalSessions > 0) totalQuestions.toDouble() / totalSessions else 0.0
+    val recentActiveDays = recentActivity.count { it.questionCount > 0 }
+    val recentVisionDays = recentActivity.count { it.imageQuestionCount > 0 }
+    val textQuestions = (totalQuestions - visionQuestions).coerceAtLeast(0)
+    val visionPatternBreakdown = listOfNotNull(
+        AnalyticsBreakdownItem(
+            label = "Image-grounded",
+            count = visionQuestions,
+            share = if (totalQuestions > 0) visionQuestions.toFloat() / totalQuestions else 0f,
+            supportingText = if (visionQuestions > 0) "$visionQuestions questions used an image." else "No image questions yet."
+        ),
+        AnalyticsBreakdownItem(
+            label = "Text-only",
+            count = textQuestions,
+            share = if (totalQuestions > 0) textQuestions.toFloat() / totalQuestions else 0f,
+            supportingText = if (textQuestions > 0) "$textQuestions questions were text-only." else "Every question so far used an image."
+        )
+    )
+    val weeklyQuestionDelta = questionsThisWeek - previousWeekQuestions
+    val weeklyTrendLabel = when {
+        weeklyQuestionDelta > 0 -> "+$weeklyQuestionDelta"
+        weeklyQuestionDelta < 0 -> weeklyQuestionDelta.toString()
+        else -> "0"
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -2377,7 +2526,7 @@ private fun PremiumAnalyticsDialog(
                                 AnalyticsHighlightCard(
                                     label = "Time Spent Learning",
                                     value = formatStudyTime(timeSpentMinutes),
-                                    supportingText = if (timeSpentMinutes > 0) "Most active topic: $topTopic" else "Start chatting to build your timeline",
+                                    supportingText = if (timeSpentMinutes > 0) "Tracked across active chat sessions. Most active topic: $topTopic" else "Start chatting to build your timeline",
                                     icon = Icons.Rounded.Schedule,
                                     color = AccentOrange,
                                     modifier = Modifier.fillMaxWidth()
@@ -2423,11 +2572,84 @@ private fun PremiumAnalyticsDialog(
                             },
                             second = { modifier ->
                                 StatBox(
-                                    label = "Avg. Reply",
+                                    label = "Avg. Response",
                                     value = formatResponseTime(avgResponseTimeMs),
                                     color = AccentGreen,
                                     icon = Icons.Rounded.Speed,
                                     modifier = modifier
+                                )
+                            }
+                        )
+                        ResponsiveAnalyticsPair(
+                            compact = isCompactLayout,
+                            first = { modifier ->
+                                StatBox(
+                                    label = "Assistant Replies",
+                                    value = totalResponses.toString(),
+                                    color = AccentOrange,
+                                    icon = Icons.Rounded.SmartToy,
+                                    modifier = modifier,
+                                    supportingText = "${avgTokensPerResponse.toInt()} avg tokens per reply"
+                                )
+                            },
+                            second = { modifier ->
+                                StatBox(
+                                    label = "Feedback Coverage",
+                                    value = "$feedbackCoveragePercent%",
+                                    color = AccentPink,
+                                    icon = Icons.Rounded.ThumbUp,
+                                    modifier = modifier,
+                                    supportingText = "Share likes or dislikes to train personalization"
+                                )
+                            }
+                        )
+
+                        if (analyticsInsights.isNotEmpty()) {
+                            AnalyticsSectionHeader(
+                                title = "Insights",
+                                subtitle = "What stands out from your study history right now"
+                            )
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                analyticsInsights.forEachIndexed { index, insight ->
+                                    AnalyticsInsightCard(
+                                        title = insight.title,
+                                        description = insight.description,
+                                        color = when (index % 4) {
+                                            0 -> AccentBlue
+                                            1 -> AccentGreen
+                                            2 -> AccentOrange
+                                            else -> AccentViolet
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
+                        }
+
+                        AnalyticsSectionHeader(
+                            title = "Learning Mix",
+                            subtitle = "Which study styles and local models show up most"
+                        )
+                        ResponsiveAnalyticsPair(
+                            compact = isCompactLayout,
+                            first = { modifier ->
+                                AnalyticsBreakdownCard(
+                                    title = "Mode usage",
+                                    subtitle = "Your most-used answer styles",
+                                    items = modeBreakdown.take(5),
+                                    color = AccentBlue,
+                                    modifier = modifier,
+                                    emptyState = "Mode usage appears after a few assistant replies."
+                                )
+                            },
+                            second = { modifier ->
+                                AnalyticsBreakdownCard(
+                                    title = "Model usage",
+                                    subtitle = "Which offline engines answered most often",
+                                    items = modelBreakdown.take(4),
+                                    color = AccentGreen,
+                                    modifier = modifier,
+                                    emptyState = "Model usage appears after replies are saved."
                                 )
                             }
                         )
@@ -2486,6 +2708,20 @@ private fun PremiumAnalyticsDialog(
                             compact = isCompactLayout,
                             first = { modifier ->
                                 StatBox(
+                                    label = "Week-over-Week",
+                                    value = weeklyTrendLabel,
+                                    color = when {
+                                        weeklyQuestionDelta > 0 -> AccentGreen
+                                        weeklyQuestionDelta < 0 -> AccentOrange
+                                        else -> AccentBlue
+                                    },
+                                    icon = if (weeklyQuestionDelta >= 0) Icons.Rounded.ArrowUpward else Icons.Rounded.ArrowDownward,
+                                    modifier = modifier,
+                                    supportingText = "Compared with $previousWeekQuestions questions in the previous 7 days"
+                                )
+                            },
+                            second = { modifier ->
+                                StatBox(
                                     label = "Peak Study Time",
                                     value = peakStudyWindow,
                                     color = AccentCyan,
@@ -2493,8 +2729,11 @@ private fun PremiumAnalyticsDialog(
                                     modifier = modifier,
                                     supportingText = "Your busiest study hour"
                                 )
-                            },
-                            second = { modifier ->
+                            }
+                        )
+                        ResponsiveAnalyticsPair(
+                            compact = isCompactLayout,
+                            first = { modifier ->
                                 StatBox(
                                     label = "Questions / Active Day",
                                     value = String.format("%.1f", avgQuestionsPerActiveDay),
@@ -2502,6 +2741,46 @@ private fun PremiumAnalyticsDialog(
                                     icon = Icons.Rounded.Analytics,
                                     modifier = modifier,
                                     supportingText = "Average daily intensity"
+                                )
+                            },
+                            second = { modifier ->
+                                StatBox(
+                                    label = "Questions / Session",
+                                    value = String.format("%.1f", questionsPerSession),
+                                    color = AccentPink,
+                                    icon = Icons.Rounded.Analytics,
+                                    modifier = modifier,
+                                    supportingText = "Average pace"
+                                )
+                            }
+                        )
+                        AnalyticsTrendChartCard(
+                            title = "Last 7 days",
+                            subtitle = "Question volume by day. Pink dots mark days with image-based study.",
+                            points = recentActivity,
+                            color = AccentBlue,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        ResponsiveAnalyticsPair(
+                            compact = isCompactLayout,
+                            first = { modifier ->
+                                StatBox(
+                                    label = "Consistency",
+                                    value = "$studyConsistencyPercent%",
+                                    color = AccentGreen,
+                                    icon = Icons.Rounded.Insights,
+                                    modifier = modifier,
+                                    supportingText = "$recentActiveDays of the last 7 days had study activity"
+                                )
+                            },
+                            second = { modifier ->
+                                StatBox(
+                                    label = "Image Study Days",
+                                    value = recentVisionDays.toString(),
+                                    color = AccentPink,
+                                    icon = Icons.Rounded.PhotoLibrary,
+                                    modifier = modifier,
+                                    supportingText = "Days with at least one image-based question"
                                 )
                             }
                         )
@@ -2525,22 +2804,20 @@ private fun PremiumAnalyticsDialog(
                                     compact = isCompactLayout,
                                     first = { modifier ->
                                         StatBox(
-                                            label = "Learning Style",
+                                            label = "Query Style",
                                             value = queryStyle,
                                             color = AccentOrange,
                                             icon = Icons.Rounded.AutoAwesome,
                                             modifier = modifier,
-                                            supportingText = "${avgQueryLength.toInt()} avg chars / question"
+                                            supportingText = "${avgQueryLength.toInt()} avg chars per question"
                                         )
                                     },
                                     second = { modifier ->
-                                        StatBox(
-                                            label = "Questions / Session",
-                                            value = String.format("%.1f", questionsPerSession),
+                                        AnalyticsTag(
+                                            label = bestRatedMode?.let { "Best-rated mode: $it" } ?: "Best-rated mode: build more feedback",
                                             color = AccentPink,
-                                            icon = Icons.Rounded.Analytics,
-                                            modifier = modifier,
-                                            supportingText = "Average pace"
+                                            icon = Icons.Rounded.ThumbUp,
+                                            modifier = modifier
                                         )
                                     }
                                 )
@@ -2571,7 +2848,7 @@ private fun PremiumAnalyticsDialog(
                                     compact = isCompactLayout,
                                     first = { modifier ->
                                         AnalyticsTag(
-                                            label = "Mode: $preferredMode",
+                                            label = "Most-used mode: $preferredMode",
                                             color = AccentBlue,
                                             icon = Icons.Rounded.Tune,
                                             modifier = modifier
@@ -2579,7 +2856,7 @@ private fun PremiumAnalyticsDialog(
                                     },
                                     second = { modifier ->
                                         AnalyticsTag(
-                                            label = "Language: $preferredLanguage",
+                                            label = "Most-used language: $preferredLanguage",
                                             color = AccentGreen,
                                             icon = Icons.Rounded.Language,
                                             modifier = modifier
@@ -2590,7 +2867,7 @@ private fun PremiumAnalyticsDialog(
                                     compact = isCompactLayout,
                                     first = { modifier ->
                                         AnalyticsTag(
-                                            label = "Level: $preferredLevel",
+                                            label = "Level setting: $preferredLevel",
                                             color = AccentViolet,
                                             icon = Icons.Rounded.School,
                                             modifier = modifier
@@ -2607,6 +2884,80 @@ private fun PremiumAnalyticsDialog(
                                 )
                             }
                         }
+
+                        AnalyticsSectionHeader(
+                            title = "AI & Vision",
+                            subtitle = "How the local text and vision models are being used"
+                        )
+                        ResponsiveAnalyticsPair(
+                            compact = isCompactLayout,
+                            first = { modifier ->
+                                StatBox(
+                                    label = "Vision Questions",
+                                    value = visionQuestions.toString(),
+                                    color = AccentPink,
+                                    icon = Icons.Rounded.PhotoLibrary,
+                                    modifier = modifier,
+                                    supportingText = "$visionSharePercent% of all questions included an image"
+                                )
+                            },
+                            second = { modifier ->
+                                StatBox(
+                                    label = "First Token",
+                                    value = formatResponseTime(avgTimeToFirstTokenMs),
+                                    color = AccentCyan,
+                                    icon = Icons.Rounded.Timer,
+                                    modifier = modifier,
+                                    supportingText = "Average time until the first streamed token"
+                                )
+                            }
+                        )
+                        ResponsiveAnalyticsPair(
+                            compact = isCompactLayout,
+                            first = { modifier ->
+                                StatBox(
+                                    label = "Mode Variety",
+                                    value = modeVariety.toString(),
+                                    color = AccentViolet,
+                                    icon = Icons.Rounded.Tune,
+                                    modifier = modifier,
+                                    supportingText = "Different learning modes used so far"
+                                )
+                            },
+                            second = { modifier ->
+                                StatBox(
+                                    label = "Model Variety",
+                                    value = modelVariety.toString(),
+                                    color = AccentOrange,
+                                    icon = Icons.Rounded.SmartToy,
+                                    modifier = modifier,
+                                    supportingText = "Different local model paths seen in replies"
+                                )
+                            }
+                        )
+                        ResponsiveAnalyticsPair(
+                            compact = isCompactLayout,
+                            first = { modifier ->
+                                AnalyticsBreakdownCard(
+                                    title = "Feedback mix",
+                                    subtitle = "How your ratings are distributed",
+                                    items = feedbackBreakdown.filter { it.count > 0 },
+                                    color = AccentPink,
+                                    modifier = modifier,
+                                    emptyState = "Start rating replies to build this signal."
+                                )
+                            },
+                            second = { modifier ->
+                                AnalyticsBreakdownCard(
+                                    title = "Input mix",
+                                    subtitle = "How often you switch between text and image prompts",
+                                    items = visionPatternBreakdown,
+                                    color = AccentOrange,
+                                    modifier = modifier,
+                                    emptyState = "Ask a few questions to build this signal."
+                                )
+                            }
+                        )
 
                         AnalyticsSectionHeader(
                             title = "Topics Covered",
@@ -2854,6 +3205,255 @@ private fun AnalyticsHighlightCard(
 }
 
 @Composable
+private fun AnalyticsInsightCard(
+    title: String,
+    description: String,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = color.copy(alpha = 0.1f),
+        shape = RoundedCornerShape(18.dp),
+        modifier = modifier,
+        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.18f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Surface(
+                modifier = Modifier.size(36.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = color.copy(alpha = 0.16f)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.Insights, null, tint = color, modifier = Modifier.size(18.dp))
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                    lineHeight = 18.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AnalyticsBreakdownCard(
+    title: String,
+    subtitle: String,
+    items: List<AnalyticsBreakdownItem>,
+    color: Color,
+    modifier: Modifier = Modifier,
+    emptyState: String
+) {
+    Surface(
+        color = SurfaceSecondary,
+        shape = RoundedCornerShape(20.dp),
+        modifier = modifier,
+        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.16f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                color = Color.White,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary,
+                lineHeight = 18.sp
+            )
+
+            if (items.isEmpty()) {
+                Text(
+                    text = emptyState,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextMuted,
+                    lineHeight = 18.sp
+                )
+            } else {
+                items.forEach { item ->
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = item.label,
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color.White,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = "${item.count} · ${String.format("%.0f%%", item.share * 100f)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = color
+                            )
+                        }
+                        LinearProgressIndicator(
+                            progress = { item.share.coerceIn(0f, 1f) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp),
+                            color = color,
+                            trackColor = BackgroundDark
+                        )
+                        item.supportingText?.let { supporting ->
+                            Text(
+                                text = supporting,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextMuted,
+                                lineHeight = 18.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AnalyticsTrendChartCard(
+    title: String,
+    subtitle: String,
+    points: List<DailyActivityPoint>,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = SurfaceSecondary,
+        shape = RoundedCornerShape(20.dp),
+        modifier = modifier,
+        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.16f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                color = Color.White,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary,
+                lineHeight = 18.sp
+            )
+
+            if (points.isEmpty()) {
+                Text(
+                    text = "Study for a few days and your recent activity chart will appear here.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextMuted,
+                    lineHeight = 18.sp
+                )
+            } else {
+                val maxCount = (points.maxOfOrNull { it.questionCount } ?: 0).coerceAtLeast(1)
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(150.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    points.forEach { point ->
+                        val ratio = point.questionCount.toFloat() / maxCount
+                        val barHeight = if (point.questionCount > 0) 20.dp + (72.dp * ratio) else 10.dp
+
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Bottom
+                        ) {
+                            Text(
+                                text = point.questionCount.toString(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (point.questionCount > 0) Color.White else TextMuted
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .height(92.dp)
+                                    .width(24.dp),
+                                contentAlignment = Alignment.BottomCenter
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(barHeight)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(
+                                            if (point.questionCount > 0) color else Color.White.copy(alpha = 0.08f)
+                                        )
+                                )
+                                if (point.imageQuestionCount > 0) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopCenter)
+                                            .padding(top = 4.dp)
+                                            .size(7.dp)
+                                            .clip(CircleShape)
+                                            .background(AccentPink)
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = point.label,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextSecondary
+                            )
+                        }
+                    }
+                }
+
+                Text(
+                    text = "Pink dots mark days that included at least one image-based question.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextMuted,
+                    lineHeight = 18.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun AnalyticsSectionHeader(
     title: String,
     subtitle: String
@@ -3001,6 +3601,13 @@ private fun formatStudyTime(minutes: Int): String {
     }
 }
 
+private fun formatFileSize(bytes: Long): String {
+    if (bytes <= 0L) return "0 B"
+    val kilobytes = bytes / 1024.0
+    if (kilobytes < 1024) return String.format("%.0f KB", kilobytes)
+    return String.format("%.2f MB", kilobytes / 1024.0)
+}
+
 private fun displayModelName(modelName: String): String = when {
     modelName.contains("SmolVLM", ignoreCase = true) -> "Vision Model: $modelName"
     modelName.contains("SmolLM2", ignoreCase = true) -> "Language Model: $modelName"
@@ -3030,7 +3637,24 @@ private fun ReasoningStepsDialog(
     isLoading: Boolean,
     onDismiss: () -> Unit
 ) {
-    val pagerState = rememberPagerState(pageCount = { 3 })
+    val tabs = remember(sourceDetails?.imageAnalysisTrace, sourceDetails?.imageUri) {
+        buildList {
+            add("Overview")
+            add("Attempts")
+            add("Steps")
+            if (sourceDetails?.imageAnalysisTrace != null || sourceDetails?.imageUri != null) {
+                add("Image")
+            }
+        }
+    }
+    val hasAnalyzedPreview = remember(sourceDetails?.imageUri, sourceDetails?.imageAnalysisTrace?.analyzedImageUri) {
+        val analyzedUri = sourceDetails?.imageAnalysisTrace?.analyzedImageUri
+        analyzedUri != null && analyzedUri != sourceDetails?.imageUri
+    }
+    var showAnalyzedImageCopy by remember(sourceDetails?.imageUri, sourceDetails?.imageAnalysisTrace?.analyzedImageUri) {
+        mutableStateOf(hasAnalyzedPreview)
+    }
+    val pagerState = rememberPagerState(pageCount = { tabs.size })
     val scope = rememberCoroutineScope()
 
     ModalBottomSheet(
@@ -3042,7 +3666,11 @@ private fun ReasoningStepsDialog(
             Text("How This Answer Was Generated", style = MaterialTheme.typography.headlineSmall, color = Color.White, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
             Text(
-                "Swipe between overview, attempts, and steps. This sheet now shows the real local attempt trace for the answer.",
+                if ("Image" in tabs) {
+                    "Swipe between overview, attempts, steps, and image. This sheet now shows the real local generation trace for the answer."
+                } else {
+                    "Swipe between overview, attempts, and steps. This sheet now shows the real local generation trace for the answer."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary
             )
@@ -3052,24 +3680,14 @@ private fun ReasoningStepsDialog(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                TinyMetaChip(
-                    label = "Overview",
-                    textColor = if (pagerState.currentPage == 0) AccentBlue else TextMuted,
-                    borderColor = if (pagerState.currentPage == 0) AccentBlue.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.12f),
-                    onClick = { scope.launch { pagerState.animateScrollToPage(0) } }
-                )
-                TinyMetaChip(
-                    label = "Attempts",
-                    textColor = if (pagerState.currentPage == 1) AccentBlue else TextMuted,
-                    borderColor = if (pagerState.currentPage == 1) AccentBlue.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.12f),
-                    onClick = { scope.launch { pagerState.animateScrollToPage(1) } }
-                )
-                TinyMetaChip(
-                    label = "Steps",
-                    textColor = if (pagerState.currentPage == 2) AccentBlue else TextMuted,
-                    borderColor = if (pagerState.currentPage == 2) AccentBlue.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.12f),
-                    onClick = { scope.launch { pagerState.animateScrollToPage(2) } }
-                )
+                tabs.forEachIndexed { index, label ->
+                    TinyMetaChip(
+                        label = label,
+                        textColor = if (pagerState.currentPage == index) AccentBlue else TextMuted,
+                        borderColor = if (pagerState.currentPage == index) AccentBlue.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.12f),
+                        onClick = { scope.launch { pagerState.animateScrollToPage(index) } }
+                    )
+                }
             }
 
             Spacer(Modifier.height(16.dp))
@@ -3078,8 +3696,8 @@ private fun ReasoningStepsDialog(
                 state = pagerState,
                 modifier = Modifier.weight(1f)
             ) { page ->
-                when (page) {
-                    0 -> {
+                when (tabs[page]) {
+                    "Overview" -> {
                         LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             item {
                                 sourceDetails?.let { source ->
@@ -3093,6 +3711,23 @@ private fun ReasoningStepsDialog(
                                         content = "Mode: ${source.modeLabel}${source.assistantLabel?.let { " · Assistant: $it" }.orEmpty()}",
                                         accent = AccentOrange
                                     )
+                                    source.imageAnalysisTrace?.let { trace ->
+                                        SourceInfoCard(
+                                            title = "Input Analysis",
+                                            content = buildString {
+                                                append(trace.analysisSummary)
+                                                if (trace.preprocessingSummary.isNotBlank()) {
+                                                    append("\n")
+                                                    append(trace.preprocessingSummary)
+                                                }
+                                                if (trace.previewNote.isNotBlank()) {
+                                                    append("\n")
+                                                    append(trace.previewNote)
+                                                }
+                                            },
+                                            accent = AccentPink
+                                        )
+                                    }
                                     SourceInfoCard(
                                         title = "Generation Info",
                                         content = buildString {
@@ -3129,121 +3764,250 @@ private fun ReasoningStepsDialog(
                         }
                     }
 
-                    else -> {
-                        when (page) {
-                            1 -> {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (sourceDetails?.attempts.isNullOrEmpty()) {
-                                        Text(
-                                            "No attempt-by-attempt trace is available for this reply.",
-                                            color = TextSecondary,
-                                            style = MaterialTheme.typography.bodySmall
-                                        )
-                                    } else {
-                                        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                            items(sourceDetails?.attempts.orEmpty()) { attempt ->
-                                                Surface(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    color = if (attempt.wasSelected) AccentBlue.copy(alpha = 0.12f) else SurfaceSecondary,
-                                                    shape = RoundedCornerShape(12.dp),
-                                                    border = if (attempt.wasSelected) androidx.compose.foundation.BorderStroke(1.dp, AccentBlue.copy(alpha = 0.35f)) else null
+                    "Attempts" -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (sourceDetails?.attempts.isNullOrEmpty()) {
+                                Text(
+                                    "No attempt-by-attempt trace is available for this reply.",
+                                    color = TextSecondary,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            } else {
+                                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    items(sourceDetails?.attempts.orEmpty()) { attempt ->
+                                        Surface(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            color = if (attempt.wasSelected) AccentBlue.copy(alpha = 0.12f) else SurfaceSecondary,
+                                            shape = RoundedCornerShape(12.dp),
+                                            border = if (attempt.wasSelected) androidx.compose.foundation.BorderStroke(1.dp, AccentBlue.copy(alpha = 0.35f)) else null
+                                        ) {
+                                            Column(modifier = Modifier.padding(16.dp)) {
+                                                Row(
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
                                                 ) {
-                                                    Column(modifier = Modifier.padding(16.dp)) {
-                                                        Row(
-                                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                                            verticalAlignment = Alignment.CenterVertically
-                                                        ) {
-                                                            Text(
-                                                                text = attempt.label,
-                                                                style = MaterialTheme.typography.labelLarge,
-                                                                color = if (attempt.wasSelected) AccentBlue else Color.White,
-                                                                fontWeight = FontWeight.Bold
-                                                            )
-                                                            if (attempt.wasSelected) {
-                                                                TinyMetaChip(
-                                                                    label = "Final",
-                                                                    textColor = AccentBlue,
-                                                                    borderColor = AccentBlue.copy(alpha = 0.28f)
-                                                                )
-                                                            }
-                                                            if (attempt.wasStreamed) {
-                                                                TinyMetaChip("Visible")
-                                                            }
-                                                        }
-                                                        attempt.reason?.takeIf { it.isNotBlank() }?.let { reason ->
-                                                            Spacer(Modifier.height(8.dp))
-                                                            Text(
-                                                                text = reason,
-                                                                style = MaterialTheme.typography.bodySmall,
-                                                                color = TextSecondary
-                                                            )
-                                                        }
-                                                        Spacer(Modifier.height(10.dp))
-                                                        SelectionContainer {
-                                                            Text(
-                                                                text = attempt.text.ifBlank { "[No visible text captured for this attempt]" },
-                                                                style = MaterialTheme.typography.bodySmall,
-                                                                color = Color.White.copy(alpha = 0.92f)
-                                                            )
-                                                        }
+                                                    Text(
+                                                        text = attempt.label,
+                                                        style = MaterialTheme.typography.labelLarge,
+                                                        color = if (attempt.wasSelected) AccentBlue else Color.White,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                    if (attempt.wasSelected) {
+                                                        TinyMetaChip(
+                                                            label = "Final",
+                                                            textColor = AccentBlue,
+                                                            borderColor = AccentBlue.copy(alpha = 0.28f)
+                                                        )
                                                     }
+                                                    if (attempt.wasStreamed) {
+                                                        TinyMetaChip("Visible")
+                                                    }
+                                                }
+                                                attempt.reason?.takeIf { it.isNotBlank() }?.let { reason ->
+                                                    Spacer(Modifier.height(8.dp))
+                                                    Text(
+                                                        text = reason,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = TextSecondary
+                                                    )
+                                                }
+                                                Spacer(Modifier.height(10.dp))
+                                                SelectionContainer {
+                                                    Text(
+                                                        text = attempt.text.ifBlank { "[No visible text captured for this attempt]" },
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = Color.White.copy(alpha = 0.92f)
+                                                    )
                                                 }
                                             }
                                         }
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    "Steps" -> {
+                        when {
+                            isLoading -> {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(color = AccentBlue)
+                                }
+                            }
+
+                            reasoningSteps.isEmpty() -> {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        "No step-by-step source details are available for this reply.",
+                                        color = TextSecondary,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                            }
 
                             else -> {
-                                when {
-                                    isLoading -> {
-                                        Box(
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentAlignment = Alignment.Center
+                                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    items(reasoningSteps) { step ->
+                                        Surface(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            color = SurfaceSecondary,
+                                            shape = RoundedCornerShape(12.dp)
                                         ) {
-                                            CircularProgressIndicator(color = AccentBlue)
+                                            Column(modifier = Modifier.padding(16.dp)) {
+                                                Text(
+                                                    "Step ${step.stepNumber}: ${step.title}",
+                                                    style = MaterialTheme.typography.labelLarge,
+                                                    color = AccentBlue,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                Spacer(Modifier.height(8.dp))
+                                                Text(
+                                                    step.description,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = TextSecondary
+                                                )
+                                            }
                                         }
                                     }
+                                }
+                            }
+                        }
+                    }
 
-                                    reasoningSteps.isEmpty() -> {
-                                        Box(
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentAlignment = Alignment.Center
+                    else -> {
+                        val trace = sourceDetails?.imageAnalysisTrace
+                        if (trace == null && sourceDetails?.imageUri == null) {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "No image-analysis trace is available for this reply.",
+                                    color = TextSecondary,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        } else {
+                            val previewUri = if (showAnalyzedImageCopy) {
+                                trace?.analyzedImageUri ?: sourceDetails?.imageUri
+                            } else {
+                                sourceDetails?.imageUri ?: trace?.analyzedImageUri
+                            }
+                            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                item {
+                                    if (hasAnalyzedPreview) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .horizontalScroll(rememberScrollState()),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
-                                            Text(
-                                                "No step-by-step source details are available for this reply.",
-                                                color = TextSecondary,
-                                                style = MaterialTheme.typography.bodySmall
+                                            TinyMetaChip(
+                                                label = "Original upload",
+                                                textColor = if (!showAnalyzedImageCopy) AccentBlue else TextMuted,
+                                                borderColor = if (!showAnalyzedImageCopy) AccentBlue.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.12f),
+                                                onClick = { showAnalyzedImageCopy = false }
+                                            )
+                                            TinyMetaChip(
+                                                label = "Analyzed copy",
+                                                textColor = if (showAnalyzedImageCopy) AccentBlue else TextMuted,
+                                                borderColor = if (showAnalyzedImageCopy) AccentBlue.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.12f),
+                                                onClick = { showAnalyzedImageCopy = true }
                                             )
                                         }
                                     }
-
-                                    else -> {
-                                        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                            items(reasoningSteps) { step ->
-                                                Surface(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    color = SurfaceSecondary,
-                                                    shape = RoundedCornerShape(12.dp)
-                                                ) {
-                                                    Column(modifier = Modifier.padding(16.dp)) {
-                                                        Text(
-                                                            "Step ${step.stepNumber}: ${step.title}",
-                                                            style = MaterialTheme.typography.labelLarge,
-                                                            color = AccentBlue,
-                                                            fontWeight = FontWeight.Bold
-                                                        )
-                                                        Spacer(Modifier.height(8.dp))
-                                                        Text(
-                                                            step.description,
-                                                            style = MaterialTheme.typography.bodySmall,
-                                                            color = TextSecondary
-                                                        )
-                                                    }
+                                }
+                                previewUri?.let { imageUri ->
+                                    item {
+                                        Surface(
+                                            color = SurfaceSecondary,
+                                            shape = RoundedCornerShape(18.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            AsyncImage(
+                                                model = imageUri,
+                                                contentDescription = if (showAnalyzedImageCopy) "Analyzed model copy" else "Source image",
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .heightIn(min = 200.dp, max = 320.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                                trace?.let { imageTrace ->
+                                    item {
+                                        SourceInfoCard(
+                                            title = "Image Summary",
+                                            content = buildString {
+                                                append(imageTrace.analysisSummary)
+                                                if (imageTrace.preprocessingSummary.isNotBlank()) {
+                                                    append("\n")
+                                                    append(imageTrace.preprocessingSummary)
                                                 }
+                                                if (imageTrace.previewNote.isNotBlank()) {
+                                                    append("\n")
+                                                    append(imageTrace.previewNote)
+                                                }
+                                            },
+                                            accent = AccentBlue
+                                        )
+                                    }
+                                    item {
+                                        SourceInfoCard(
+                                            title = "Image Details",
+                                            content = buildString {
+                                                append("Source: ${imageTrace.sourceLabel}")
+                                                append("\nFocus: ${imageTrace.focusModeLabel}")
+                                                imageTrace.mimeType?.takeIf { it.isNotBlank() }?.let { append("\nType: $it") }
+                                                if (imageTrace.originalWidth > 0 && imageTrace.originalHeight > 0) {
+                                                    append("\nOriginal: ${imageTrace.originalWidth}x${imageTrace.originalHeight}")
+                                                }
+                                                if (imageTrace.processedWidth > 0 && imageTrace.processedHeight > 0) {
+                                                    append("\nModel input: ${imageTrace.processedWidth}x${imageTrace.processedHeight}")
+                                                }
+                                                if (imageTrace.originalSizeBytes > 0L) {
+                                                    append("\nOriginal size: ${formatFileSize(imageTrace.originalSizeBytes)}")
+                                                }
+                                                if (imageTrace.processedSizeBytes > 0L) {
+                                                    append("\nModel copy size: ${formatFileSize(imageTrace.processedSizeBytes)}")
+                                                }
+                                            },
+                                            accent = AccentGreen
+                                        )
+                                    }
+                                    items(imageTrace.steps) { step ->
+                                        Surface(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            color = SurfaceSecondary,
+                                            shape = RoundedCornerShape(12.dp),
+                                            border = androidx.compose.foundation.BorderStroke(
+                                                1.dp,
+                                                if (step.wasApplied) AccentBlue.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.08f)
+                                            )
+                                        ) {
+                                            Column(modifier = Modifier.padding(16.dp)) {
+                                                Text(
+                                                    text = step.title,
+                                                    style = MaterialTheme.typography.labelLarge,
+                                                    color = if (step.wasApplied) AccentBlue else TextMuted,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                Spacer(Modifier.height(8.dp))
+                                                Text(
+                                                    text = step.description,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = TextSecondary
+                                                )
                                             }
                                         }
                                     }
@@ -3285,11 +4049,13 @@ private fun SourceInfoCard(
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.height(8.dp))
-            Text(
-                text = content,
-                style = MaterialTheme.typography.bodySmall,
-                color = TextSecondary
-            )
+            SelectionContainer {
+                Text(
+                    text = content,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
+            }
         }
     }
 }

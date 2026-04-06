@@ -19,6 +19,8 @@ class ResponseParser {
             .replace(Regex("(?i)^Answer:\\s*"), "")
             .replace(Regex("(?i)^Response:\\s*"), "")
             .replace(Regex("(?i)^Assistant:\\s*"), "")
+            .replace(Regex("(?i)^you\\s+are\\s+algsoch,?\\s+an\\s+image-grounded\\s+ai\\s+companion\\.?\\s*"), "")
+            .replace(Regex("(?i)^algsoch,?\\s+an\\s+image-grounded\\s+ai\\s+companion\\.?\\s*"), "")
             .replace("<|im_end|>", "")
             .replace("<|im_start|>", "")
             .replace("<end_of_utterance>", "")

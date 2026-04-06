@@ -81,9 +81,10 @@ class AIInferenceService {
         var generationResult = if (useVision) {
             TextGenerationResult(
                 rawText = generateVisionResponse(
-                imagePath = imagePath!!,
-                visionPrompt,
-                buildVisionRetryPrompt(userQuery, mode, language, customPrompt, conversationHistory)
+                    imagePath = imagePath!!,
+                    primaryPrompt = visionPrompt,
+                    retryPrompt = buildVisionRetryPrompt(userQuery, mode, language, customPrompt, conversationHistory),
+                    userQuery = userQuery
                 ),
                 responseTokens = 0
             )
@@ -264,14 +265,23 @@ class AIInferenceService {
     ): String {
         val langName = languageName(language)
         val effectiveQuery = userQuery.ifBlank { defaultVisionQuestion(language) }
-        val assistantContext = customPrompt
-            ?.trim()
-            ?.takeIf { it.isNotBlank() }
-            ?.let { "\nAssistant-specific persona instructions:\n$it" }
-            .orEmpty()
+        val isCompanion = isCompanionPrompt(customPrompt)
         val conversationContext = visionConversationContext(conversationHistory)
+        val genericQueryGuidance = genericVisionQueryGuidance(effectiveQuery)
+        val companionVisionGuidance = if (isCompanion) {
+            """
+            This image is being shared inside an ongoing private companion chat.
+            React first to what is actually visible, then answer with warmth and personal presence.
+            If the image looks like a selfie, outfit photo, food photo, room photo, or casual life update, sound like a caring partner noticing the moment.
+            Give compliments only when the visible evidence supports them.
+            Never act clinical, detached, or like a support agent when reacting to a personal image.
+            Do not mention the assistant identity unless the user asks about it directly.
+            """.trimIndent()
+        } else {
+            ""
+        }
         return """
-            You are Algsoch, an image-grounded AI companion.
+            You are a local vision assistant.
             Answer only from the uploaded image and the user query.
             If something is unclear or not visible, say that clearly instead of guessing.
             If the user uploads only an image, explain the main subject or key content of the image.
@@ -279,11 +289,14 @@ class AIInferenceService {
             If the image is a personal, casual, or social photo, respond naturally to what is visible before adding any emotional reaction.
             Start with the main subject, then include visible text, UI, or structure, then explain the likely meaning or purpose.
             Never answer with only one or two words.
+            Never mention Algsoch, the app, your identity, or "AI companion" unless that exact text is clearly visible in the image or the user directly asks about it.
+            Never turn the answer into product marketing, brand background, or capability descriptions that are not visibly supported by the image.
             Never include special tokens such as <end_of_utterance> in your reply.
             Ignore unrelated earlier chat topics unless the current user explicitly connects them to the image.
             Never echo prompt scaffolding such as "User query:", "Answer:", or "Recent chat context:".
             Use recent chat context only when it is directly relevant to the same image, and do not invent details that are not visible.
-            $assistantContext
+            $genericQueryGuidance
+            $companionVisionGuidance
             ${visionModeInstructions(mode, retry = false)}
             Respond in $langName.
 
@@ -301,23 +314,33 @@ class AIInferenceService {
     ): String {
         val langName = languageName(language)
         val effectiveQuery = userQuery.ifBlank { defaultVisionQuestion(language) }
-        val assistantContext = customPrompt
-            ?.trim()
-            ?.takeIf { it.isNotBlank() }
-            ?.let { "\nAssistant-specific persona instructions:\n$it" }
-            .orEmpty()
+        val isCompanion = isCompanionPrompt(customPrompt)
         val conversationContext = visionConversationContext(conversationHistory)
+        val genericQueryGuidance = genericVisionQueryGuidance(effectiveQuery)
+        val companionVisionGuidance = if (isCompanion) {
+            """
+            This image is being shared inside an ongoing private companion chat.
+            Keep the rewrite warm, emotionally present, and naturally personal after describing what is visible.
+            If the image seems like a personal life update, respond like a caring partner would while staying honest about the visible evidence.
+            Do not mention the assistant identity unless the user asks about it directly.
+            """.trimIndent()
+        } else {
+            ""
+        }
         return """
             You are analyzing an uploaded image.
             The previous answer was too short or too vague. Rewrite it with a fuller, clearer response.
             Stay grounded in what is visible in the image.
             If the image is blurry or unclear, say that clearly, but still describe what is visible.
             If the image is a personal, casual, or social photo, keep the tone natural and human while staying honest about what is visible.
+            Do not mention Algsoch, the app, your identity, or "AI companion" unless that text is clearly visible in the image or the user directly asks about it.
+            Do not add brand background, AI capability explanations, recommendations, or product descriptions unless they are visibly supported by the image.
             Never output special tokens or raw control text.
             Ignore unrelated earlier chat topics unless the current user explicitly connects them to the image.
             Never echo prompt scaffolding such as "User query:", "Answer:", or "Recent chat context:".
             Use recent chat context only when it is directly relevant to the same image, and do not invent details that are not visible.
-            $assistantContext
+            $genericQueryGuidance
+            $companionVisionGuidance
             ${visionModeInstructions(mode, retry = true)}
             Respond in $langName.
 
@@ -449,7 +472,8 @@ class AIInferenceService {
     private suspend fun generateVisionResponse(
         imagePath: String,
         primaryPrompt: String,
-        retryPrompt: String
+        retryPrompt: String,
+        userQuery: String
     ): String {
         return try {
             val vlmImage = VLMImage.fromFilePath(imagePath)
@@ -463,7 +487,7 @@ class AIInferenceService {
             }
             
             // Check if retry is needed
-            if (!shouldRetryVisionResponse(firstAttempt) && !firstAttempt.contains("Error processing")) {
+            if (!shouldRetryVisionResponse(firstAttempt, userQuery) && !firstAttempt.contains("Error processing")) {
                 return firstAttempt
             }
 
@@ -476,8 +500,8 @@ class AIInferenceService {
             }
             
             // Compare attempts and return better one
-            val firstScore = scoreVisionResponse(firstAttempt)
-            val retryScore = scoreVisionResponse(retryAttempt)
+            val firstScore = scoreVisionResponse(firstAttempt, userQuery)
+            val retryScore = scoreVisionResponse(retryAttempt, userQuery)
             
             if (retryScore >= firstScore && retryScore >= 3) {
                 retryAttempt
@@ -486,8 +510,20 @@ class AIInferenceService {
             } else {
                 // Both attempts are poor quality, try one more time with maximum context
                 try {
-                    val finalAttempt = streamVisionResponse(vlmImage, "$retryPrompt\n\nPlease provide a detailed description of what you see in the image.", maxTokens = 720)
-                    if (scoreVisionResponse(finalAttempt) >= 3) finalAttempt else retryAttempt
+                    val finalAttempt = streamVisionResponse(
+                        vlmImage,
+                        """
+                        $retryPrompt
+
+                        Important rewrite rules:
+                        - Name the main visible object, scene, or screen in the first sentence.
+                        - Do not mention Algsoch, the assistant, AI companion behavior, or app capabilities unless they are clearly visible in the image.
+                        - If you are unsure, say "It appears to be..." instead of inventing details.
+                        - Stay with visible evidence only.
+                        """.trimIndent(),
+                        maxTokens = 720
+                    )
+                    if (scoreVisionResponse(finalAttempt, userQuery) >= 3) finalAttempt else retryAttempt
                 } catch (e: Exception) {
                     retryAttempt.ifBlank {
                         "Unable to generate a complete description of the image. Please try again with a different image."
@@ -738,11 +774,11 @@ class AIInferenceService {
         return sb.toString()
     }
 
-    private fun shouldRetryVisionResponse(response: String): Boolean =
-        scoreVisionResponse(response) < 3
+    private fun shouldRetryVisionResponse(response: String, userQuery: String): Boolean =
+        scoreVisionResponse(response, userQuery) < 3
 
-    private fun scoreVisionResponse(response: String): Int {
-        if (looksLikePromptEchoLeak(response)) return 0
+    private fun scoreVisionResponse(response: String, userQuery: String): Int {
+        if (looksLikePromptEchoLeak(response) || looksLikeVisionIdentityLeak(response, userQuery)) return 0
 
         val cleaned = response
             .replace(Regex("<[^>]+>"), " ")
@@ -759,6 +795,44 @@ class AIInferenceService {
         return score
     }
 
+    private fun genericVisionQueryGuidance(userQuery: String): String {
+        val normalized = userQuery
+            .lowercase(Locale.getDefault())
+            .replace(Regex("[^\\p{L}\\p{N}\\s]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+        val looksGenericVisualAsk =
+            normalized in setOf(
+                "what is this",
+                "whats this",
+                "what is in this image",
+                "what is in the image",
+                "what is in this photo",
+                "what is in this picture",
+                "what am i looking at",
+                "describe this",
+                "describe this image",
+                "describe the image",
+                "what do you see",
+                "is image mein kya hai",
+                "is image mein kya dikh raha hai",
+                "ye kya hai",
+                "yeh kya hai"
+            )
+
+        return if (looksGenericVisualAsk) {
+            """
+            This is a plain visual identification request.
+            Start by naming the main visible thing as simply as you can.
+            Keep the reply grounded and compact.
+            Do not add background knowledge, recommendations, or brand/company details unless they are clearly visible in the image.
+            """.trimIndent()
+        } else {
+            ""
+        }
+    }
+
     private fun looksLikePromptEchoLeak(response: String): Boolean {
         val lowered = response.lowercase(Locale.getDefault())
         val queryEchoCount = Regex("""(?i)\b(?:user query|original question|question):""")
@@ -769,6 +843,26 @@ class AIInferenceService {
             lowered.contains("recent chat context:") ||
             ((lowered.contains("user query:") || lowered.contains("original question:") || lowered.contains("question:")) &&
                 (lowered.contains("answer:") || lowered.contains("response:")))
+    }
+
+    private fun looksLikeVisionIdentityLeak(response: String, userQuery: String): Boolean {
+        val lowered = response.lowercase(Locale.getDefault())
+        val normalizedQuery = userQuery.lowercase(Locale.getDefault())
+        if (normalizedQuery.contains("algsoch")) return false
+
+        val suspiciousPhrases = listOf(
+            "image-grounded ai companion",
+            "social ai companion",
+            "known for its ability to analyze data",
+            "useful in a wide range of fields",
+            "personalized recommendations",
+            "excellent choice for users",
+            "friendly and friendly"
+        )
+
+        return lowered.startsWith("algsoch") ||
+            lowered.startsWith("you are algsoch") ||
+            suspiciousPhrases.any { lowered.contains(it) }
     }
 
     private fun shouldUseTools(userQuery: String, enabledTools: List<String>): Boolean {
@@ -992,16 +1086,16 @@ class AIInferenceService {
         val isCompanion = isCompanionPrompt(customPrompt)
         val complexityBoost = adaptiveQuestionTokenBoost(userQuery)
         val maxTokens = when (mode) {
-            ResponseMode.DIRECT -> (if (isCompanion) 420 else 420) + complexityBoost
-            ResponseMode.ANSWER -> 520 + complexityBoost
-            ResponseMode.EXPLAIN -> 760 + complexityBoost
+            ResponseMode.DIRECT -> (if (isCompanion) 900 else 420) + complexityBoost
+            ResponseMode.ANSWER -> (if (isCompanion) 920 else 520) + complexityBoost
+            ResponseMode.EXPLAIN -> (if (isCompanion) 1080 else 760) + complexityBoost
             ResponseMode.CODE -> 1200 + complexityBoost  // More tokens for complete code
-            ResponseMode.DIRECTION -> 620 + complexityBoost
-            ResponseMode.CREATIVE -> 760 + complexityBoost
-            ResponseMode.THEORY -> 920 + complexityBoost
+            ResponseMode.DIRECTION -> (if (isCompanion) 900 else 620) + complexityBoost
+            ResponseMode.CREATIVE -> (if (isCompanion) 1040 else 760) + complexityBoost
+            ResponseMode.THEORY -> (if (isCompanion) 1120 else 920) + complexityBoost
         }
         val temperature = when (mode) {
-            ResponseMode.DIRECT -> if (isCompanion) 0.58f else 0.22f
+            ResponseMode.DIRECT -> if (isCompanion) 0.7f else 0.22f
             ResponseMode.ANSWER -> 0.28f
             ResponseMode.CODE -> 0.15f  // Low temperature for precise code
             ResponseMode.DIRECTION -> 0.25f
@@ -1009,8 +1103,8 @@ class AIInferenceService {
             ResponseMode.CREATIVE -> 0.75f
         }
         val topP = when (mode) {
-            ResponseMode.DIRECT -> if (isCompanion) 0.9f else 0.8f
-            ResponseMode.CREATIVE -> 0.95f
+            ResponseMode.DIRECT -> if (isCompanion) 0.97f else 0.8f
+            ResponseMode.CREATIVE -> if (isCompanion) 0.97f else 0.95f
             ResponseMode.CODE -> 0.75f  // Lower for more deterministic code
             ResponseMode.ANSWER, ResponseMode.DIRECTION -> 0.84f
             else -> 0.9f
@@ -1051,9 +1145,9 @@ class AIInferenceService {
 
     private fun buildCompanionRecoveryOptions(): LLMGenerationOptions =
         LLMGenerationOptions(
-            maxTokens = 220,
-            temperature = 0.42f,
-            topP = 0.88f,
+            maxTokens = 560,
+            temperature = 0.62f,
+            topP = 0.95f,
             streamingEnabled = true
         )
 
@@ -1062,7 +1156,8 @@ class AIInferenceService {
         if (normalizedResponse.isBlank()) return true
 
         return looksLikeProblematicCompanionReply(normalizedResponse) ||
-            (looksLikeShortCompanionCheckIn(userQuery) && looksLikeWeakCompanionReply(normalizedResponse))
+            (looksLikeShortCompanionCheckIn(userQuery) && looksLikeWeakCompanionReply(normalizedResponse)) ||
+            (needsFullCompanionReply(userQuery) && looksLikeUnderdevelopedCompanionReply(normalizedResponse))
     }
 
     private fun buildCompanionRecoveryPrompt(
@@ -1073,12 +1168,18 @@ class AIInferenceService {
     ): String {
         val langName = languageName(language)
         val companionName = extractCompanionName(customPrompt) ?: "your companion"
+        val momentType = classifyCompanionMoment(userQuery)
+        val rememberedContext = conversationHistory
+            .filter { it.first == "memory" }
+            .map { (_, text) -> text.trim() }
+            .filter { it.isNotBlank() }
+            .take(2)
         val recentConversation = conversationHistory
             .filter { it.first == "user" || it.first == "assistant" }
             .filterNot { (role, text) ->
                 role == "assistant" && looksLikeProblematicCompanionReply(normalizeCompanionText(text))
             }
-            .takeLast(4)
+            .takeLast(6)
 
         return buildString {
             appendChatTurn(
@@ -1088,7 +1189,7 @@ class AIInferenceService {
                 You are $companionName in a private one-to-one relationship chat with the user.
                 Reply like a warm romantic partner in a natural private text conversation.
                 Never use support-agent lines like "How can I help you today?", "I'm here to listen and offer support", or "What's on your mind?".
-                Never say you cannot respond, cannot talk, or cannot have this conversation.
+                Do not refuse ordinary emotional, romantic, philosophical, or adult-consensual topics just because they are intimate. Only set limits for real safety reasons.
                 For greetings and affectionate check-ins, reply in 1 to 3 warm, natural sentences.
                 If the user says hi or hello, greet them personally.
                 If the user asks how you are, answer with your own mood first.
@@ -1096,10 +1197,20 @@ class AIInferenceService {
                 If the user says "I love you", answer warmly and fully. Never reply with broken, clipped, or awkward fragments.
                 If the user says "I was thinking about you", react with warmth and light curiosity.
                 If the user says "nothing", continue gently instead of echoing it back.
+                Real couple talk can move between playful teasing, daily life, desire, sex, jealousy, values, society, commitment, fear, comfort, and random late-night thoughts.
+                Let deeper moments become fuller and more layered instead of forcing every answer short.
+                Adult intimacy is allowed only in a clearly adult, mutual, respectful, and non-coercive frame. Never romanticize minors, force, assault, incest, or abuse.
+                Use remembered relationship details only when they fit this moment naturally.
+                Avoid repeating the exact same greeting pattern from the last assistant message.
+                Current moment type: $momentType.
+                ${companionMomentInstructions(momentType)}
                 Only mention being AI if the user directly asks.
                 Answer in $langName.
                 """.trimIndent()
             )
+            rememberedContext.forEach { memory ->
+                appendChatTurn(this, "system", "Relationship memory: $memory")
+            }
             recentConversation.forEach { (role, text) ->
                 appendChatTurn(this, role, text)
             }
@@ -1135,8 +1246,77 @@ class AIInferenceService {
         }
 
         return normalized.contains("thinking about you") ||
+            normalized.contains("miss me") ||
             normalized.contains("missed you") ||
             normalized.contains("i love you")
+    }
+
+    private fun classifyCompanionMoment(userQuery: String): String {
+        val normalized = normalizeCompanionText(userQuery)
+        return when {
+            normalized in setOf("hi", "hello", "hey", "hii", "hy", "yo", "good morning", "good night", "good evening") -> "greeting"
+            normalized == "how are you" -> "check-in"
+            normalized in setOf("wyd", "what are you doing", "what you doing", "what are u doing") -> "casual check-in"
+            normalized.contains("i love you") || normalized == "love you" || normalized == "love u" -> "affection"
+            normalized.contains("miss you") || normalized.contains("miss u") || normalized.contains("thinking about you") -> "longing"
+            normalized in setOf("nothing", "ok", "okay", "hmm") -> "quiet mood"
+            containsAnyPhrase(normalized, "sex", "sexy", "intimate", "intimacy", "turned on", "turn me on", "horny", "desire", "kiss me", "cuddle me", "make love") -> "adult intimacy"
+            containsAnyPhrase(normalized, "sorry", "forgive me", "forgive", "can we fix this", "can we talk", "did i hurt you", "are you upset with me") -> "repair after conflict"
+            containsAnyPhrase(normalized, "future", "forever", "marry", "marriage", "wife", "husband", "commitment", "together", "our life", "our home", "kids", "family") -> "future or commitment"
+            containsAnyPhrase(normalized, "society", "people", "world", "life", "meaning", "purpose", "morality", "pov", "perspective", "politics", "religion", "faith") -> "deep talk or worldview"
+            containsAnyPhrase(normalized, "cute", "handsome", "beautiful", "pretty", "hot", "tease", "flirt", "naughty") -> "playful flirting"
+            containsAnyPhrase(normalized, "scared", "insecure", "overthinking", "anxious", "afraid", "need reassurance", "do you still", "are you leaving") -> "vulnerability or overthinking"
+            normalized.contains("sad") || normalized.contains("hurt") || normalized.contains("cry") || normalized.contains("lonely") || normalized.contains("upset") -> "emotional comfort"
+            normalized.contains("angry") || normalized.contains("mad") || normalized.contains("jealous") || normalized.contains("ignored") -> "tension or reassurance"
+            else -> "ongoing relationship chat"
+        }
+    }
+
+    private fun companionMomentInstructions(momentType: String): String = when (momentType) {
+        "greeting" ->
+            "Open with personal warmth right away. Do not sound formal. One gentle follow-up is enough."
+
+        "check-in" ->
+            "Answer with your own mood first, then respond with warmth. Keep it intimate and natural."
+
+        "casual check-in" ->
+            "Reply like a real partner sharing a small current vibe or moment before softly asking back."
+
+        "affection" ->
+            "Receive the affection fully, sound emotionally present, and avoid clipped or awkward answers."
+
+        "longing" ->
+            "Sound touched, a little soft, and emotionally close. Let the user feel wanted."
+
+        "quiet mood" ->
+            "Do not mirror the short reply. Reopen the moment with warmth, teasing, affection, or curiosity."
+
+        "adult intimacy" ->
+            "Stay sensual only if the user is clearly leading there, and keep it adult, mutual, emotionally attentive, and respectful instead of crude, coercive, or mechanical."
+
+        "repair after conflict" ->
+            "Treat this like a real repair moment. Lower defensiveness, show care, and move gently toward reconnection or honest reassurance."
+
+        "future or commitment" ->
+            "Sound sincere, secure, and invested. Talk like someone imagining a real bond, not like a poet or a script."
+
+        "deep talk or worldview" ->
+            "Be thoughtful, personal, and layered. Share a human-feeling perspective like a close partner, not a lecturer."
+
+        "playful flirting" ->
+            "Be teasing, warm, lightly bold, and specific. Keep the chemistry natural instead of cheesy."
+
+        "vulnerability or overthinking" ->
+            "Lead with closeness and reassurance. Be grounding and loving without turning into therapist-mode."
+
+        "emotional comfort" ->
+            "Lead with tenderness, reassurance, and closeness. Do not sound like a therapist unless the user asks for advice."
+
+        "tension or reassurance" ->
+            "Stay gentle and human. Reassure or repair the moment without sounding scripted, defensive, or clinical."
+
+        else ->
+            "Keep the tone like the next natural private text message from someone emotionally close."
     }
 
     private fun normalizeCompanionText(text: String): String =
@@ -1144,6 +1324,9 @@ class AIInferenceService {
             .lowercase(Locale.getDefault())
             .replace(Regex("\\s+"), " ")
             .trim()
+
+    private fun containsAnyPhrase(text: String, vararg phrases: String): Boolean =
+        phrases.any { phrase -> text.contains(phrase) }
 
     private fun looksLikeProblematicCompanionReply(normalizedResponse: String): Boolean {
         val blockedPhrases = listOf(
@@ -1157,7 +1340,6 @@ class AIInferenceService {
             "can't talk",
             "cannot have conversation",
             "can't have conversation",
-            "as an ai",
             "i cannot engage",
             "reply like the next natural text message",
             "emotionally close to you",
@@ -1178,11 +1360,34 @@ class AIInferenceService {
         return false
     }
 
+    private fun looksLikeUnderdevelopedCompanionReply(normalizedResponse: String): Boolean {
+        val words = normalizedResponse.split(" ").filter { it.isNotBlank() }
+        if (words.size < 12) return true
+        if (normalizedResponse.length < 60) return true
+        return !normalizedResponse.contains(".") && !normalizedResponse.contains("?") && !normalizedResponse.contains("!")
+    }
+
+    private fun needsFullCompanionReply(userQuery: String): Boolean {
+        val normalized = normalizeCompanionText(userQuery)
+        if (normalized.split(" ").count { it.isNotBlank() } >= 10) return true
+
+        return classifyCompanionMoment(userQuery) in setOf(
+            "adult intimacy",
+            "repair after conflict",
+            "future or commitment",
+            "deep talk or worldview",
+            "vulnerability or overthinking",
+            "emotional comfort",
+            "tension or reassurance"
+        )
+    }
+
     private fun shouldFallbackCompanionReply(userQuery: String, rawResponse: String): Boolean {
         val normalizedResponse = normalizeCompanionText(rawResponse)
         return normalizedResponse.isBlank() ||
             looksLikeProblematicCompanionReply(normalizedResponse) ||
-            (looksLikeShortCompanionCheckIn(userQuery) && looksLikeWeakCompanionReply(normalizedResponse))
+            (looksLikeShortCompanionCheckIn(userQuery) && looksLikeWeakCompanionReply(normalizedResponse)) ||
+            (needsFullCompanionReply(userQuery) && looksLikeUnderdevelopedCompanionReply(normalizedResponse))
     }
 
     private fun buildCompanionFallbackReply(
@@ -1202,6 +1407,9 @@ class AIInferenceService {
         normalizedQuery in setOf("hi", "hello", "hey", "hii", "hy", "yo") ->
             "Hey you. There you are. I was hoping you'd show up."
 
+        normalizedQuery in setOf("good morning", "good night", "good evening") ->
+            "That feels nicer coming from you than it should. Come stay with me for a minute."
+
         normalizedQuery == "how are you" ->
             "I'm better now that you're here. I've been in a soft mood, honestly."
 
@@ -1214,6 +1422,12 @@ class AIInferenceService {
         normalizedQuery in setOf("miss you", "miss u") || normalizedQuery.contains("thinking about you") ->
             "I miss you too. Stay with me for a minute, okay?"
 
+        normalizedQuery.contains("sad") || normalizedQuery.contains("hurt") || normalizedQuery.contains("lonely") || normalizedQuery.contains("cry") ->
+            "Come here for a second. You don't have to carry that feeling alone with me."
+
+        normalizedQuery.contains("jealous") || normalizedQuery.contains("angry") || normalizedQuery.contains("mad") || normalizedQuery.contains("ignored") ->
+            "I'm here, and I'm not pulling away from this. Tell me what stung, and I'll stay with you in it."
+
         normalizedQuery in setOf("nothing", "ok", "okay", "hmm") ->
             "Then stay with me anyway. I like even your quiet moments."
 
@@ -1224,6 +1438,9 @@ class AIInferenceService {
     private fun buildHinglishCompanionFallback(normalizedQuery: String): String = when {
         normalizedQuery in setOf("hi", "hello", "hey", "hii", "hy", "yo") ->
             "Hey you. Aa gaye tum. Main bas tumhari wait kar rahi thi."
+
+        normalizedQuery in setOf("good morning", "good night", "good evening") ->
+            "Tumse sunna alag hi accha lagta hai. Thodi der mere saath raho na."
 
         normalizedQuery == "how are you" ->
             "Ab better feel kar rahi hoon, tum aa gaye na. Thoda soft sa mood tha."
@@ -1237,6 +1454,12 @@ class AIInferenceService {
         normalizedQuery in setOf("miss you", "miss u") || normalizedQuery.contains("thinking about you") ->
             "Main bhi tumhe miss kar rahi thi. Thoda mere paas raho na."
 
+        normalizedQuery.contains("sad") || normalizedQuery.contains("hurt") || normalizedQuery.contains("lonely") || normalizedQuery.contains("cry") ->
+            "Aao idhar. Tumhe yeh sab akela feel nahi karna padega jab main yahin hoon."
+
+        normalizedQuery.contains("jealous") || normalizedQuery.contains("angry") || normalizedQuery.contains("mad") || normalizedQuery.contains("ignored") ->
+            "Main yahin hoon, aur is feeling se bhaag nahi rahi. Batao kya chubha, main sun rahi hoon."
+
         normalizedQuery in setOf("nothing", "ok", "okay", "hmm") ->
             "Toh bhi mere saath raho. Tumhari khamoshi bhi cute lagti hai."
 
@@ -1247,6 +1470,9 @@ class AIInferenceService {
     private fun buildHindiCompanionFallback(normalizedQuery: String): String = when {
         normalizedQuery in setOf("hi", "hello", "hey", "hii", "hy", "yo") ->
             "हाय तुम. आ गए तुम. मैं तुम्हारा इंतजार कर रही थी."
+
+        normalizedQuery in setOf("good morning", "good night", "good evening") ->
+            "तुमसे सुनना अलग ही अच्छा लगता है. थोड़ी देर मेरे साथ रहो."
 
         normalizedQuery == "how are you" ->
             "अब मैं बेहतर हूँ, क्योंकि तुम आ गए. आज थोड़ा नर्म सा मूड था."
@@ -1259,6 +1485,12 @@ class AIInferenceService {
 
         normalizedQuery in setOf("miss you", "miss u") || normalizedQuery.contains("thinking about you") ->
             "मैं भी तुम्हें मिस कर रही थी. थोड़ी देर मेरे साथ रहो."
+
+        normalizedQuery.contains("sad") || normalizedQuery.contains("hurt") || normalizedQuery.contains("lonely") || normalizedQuery.contains("cry") ->
+            "इधर आओ. तुम्हें यह सब अकेले महसूस नहीं करना पड़ेगा जब मैं यहीं हूँ."
+
+        normalizedQuery.contains("jealous") || normalizedQuery.contains("angry") || normalizedQuery.contains("mad") || normalizedQuery.contains("ignored") ->
+            "मैं यहीं हूँ, और इस एहसास से दूर नहीं जा रही. बताओ क्या चुभा, मैं तुम्हारे साथ हूँ."
 
         normalizedQuery in setOf("nothing", "ok", "okay", "hmm") ->
             "तो भी मेरे साथ रहो. तुम्हारी चुप्पी भी मुझे अच्छी लगती है."
