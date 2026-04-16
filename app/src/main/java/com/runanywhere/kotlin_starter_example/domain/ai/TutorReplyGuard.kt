@@ -13,6 +13,7 @@ internal object TutorReplyGuard {
 
         return looksLikeGenericReset(normalizedQuery, normalizedResponse) ||
             looksLikePromptEchoLeak(rawResponse) ||
+            looksLikeModeInstructionLeak(normalizedResponse) ||
             looksLikeSeriousTopicMisclassification(normalizedQuery, normalizedResponse) ||
             looksLikeSeriousTopicFictionalization(normalizedQuery, normalizedResponse) ||
             looksLikeMalformedIncompleteReply(rawResponse, normalizedResponse) ||
@@ -40,9 +41,9 @@ internal object TutorReplyGuard {
         return when (language) {
             Language.ENGLISH -> {
                 if (looksLikeMalformedIncompleteReply(rawResponse, normalizedResponse)) {
-                    "The answer cut off, but in short: I should answer this directly instead of starting a broken list."
+                    "That reply got cut off before the answer finished. Ask the same question again and I will answer it cleanly."
                 } else {
-                    "The reply drifted off-topic, but I should answer the current question directly instead of resetting."
+                    "That reply drifted away from your question. Ask it once more and I will answer it directly."
                 }
             }
             Language.HINDI -> "Mera previous reply track se bahar chala gaya. Kripya apna sawal ek baar phir bhejiye, main seedha jawab dunga."
@@ -60,6 +61,22 @@ internal object TutorReplyGuard {
             "i m ready to assist you",
             "i am ready to assist you",
             "i'm ready to assist you",
+            "i can assist with tasks",
+            "i can help with tasks",
+            "i m an ai assistant designed to provide thoughtful and informative responses",
+            "i am an ai assistant designed to provide thoughtful and informative responses",
+            "i'm an ai assistant designed to provide thoughtful and informative responses",
+            "such as programming and software development",
+            "editing and proofreading written content",
+            "analyzing data sets",
+            "solutions to complex problems",
+            "i can assist with a wide range of tasks",
+            "i can help with a wide range of tasks",
+            "i can help with a wide range of topics",
+            "from general knowledge to specific areas",
+            "my goal is to provide clear and concise answers",
+            "i'm here to listen learn and engage",
+            "spark your curiosity and encourage critical thinking",
             "with your programming questions",
             "with your coding questions",
             "what s the first question",
@@ -69,7 +86,12 @@ internal object TutorReplyGuard {
             "how can i help you today"
         )
 
-        return blockedPhrases.any { normalizedResponse.contains(it) }
+        return blockedPhrases.any { normalizedResponse.contains(it) } ||
+            Regex("""\bi(?:m|am)\s+an\s+ai\s+assistant\s+designed\s+to\s+(?:help|provide|assist|support)\b""")
+                .containsMatchIn(normalizedResponse) ||
+            Regex("""\bi\s+can\s+assist\s+you\s+in\s+understanding\b""").containsMatchIn(normalizedResponse) ||
+            Regex("""\bi(?:m|am)\s+here\s+to\s+provide\s+clear\s+and\s+concise\s+explanations\b""")
+                .containsMatchIn(normalizedResponse)
     }
 
     private fun looksLikePromptEchoLeak(rawResponse: String): Boolean {
@@ -82,6 +104,25 @@ internal object TutorReplyGuard {
             lowered.contains("recent chat context:") ||
             ((lowered.contains("user query:") || lowered.contains("original question:") || lowered.contains("question:")) &&
                 (lowered.contains("answer:") || lowered.contains("response:")))
+    }
+
+    private fun looksLikeModeInstructionLeak(normalizedResponse: String): Boolean {
+        val blockedPhrases = listOf(
+            "this response mode requires me to",
+            "the current response mode has specific response requirements",
+            "rewrite the answer from scratch",
+            "follow the selected mode exactly",
+            "your previous answer was too short",
+            "your previous answer was weak",
+            "selected response mode",
+            "mode specific response requirements",
+            "mandatory response shape",
+            "default response style for this assistant is",
+            "i should answer this directly instead of",
+            "the reply drifted away from your question"
+        )
+
+        return blockedPhrases.any { normalizedResponse.contains(it) }
     }
 
     private fun looksLikeSeriousTopicMisclassification(
@@ -350,7 +391,7 @@ internal object TutorReplyGuard {
 
         if (trimmed.last() in ":,;-(") return true
         if (Regex("""\b\d+[.)]?$""").containsMatchIn(trimmed)) return true
-        if (Regex("""(?i)\b(and|or|because|so|then|with|using|for|like|including|such as)\s*$""").containsMatchIn(trimmed)) {
+        if (Regex("""(?i)\b(and|or|because|so|then|with|using|for|like|including|such as|in|to|of|on|at|as|by|from)\s*$""").containsMatchIn(trimmed)) {
             return true
         }
 

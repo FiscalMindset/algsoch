@@ -21,7 +21,8 @@ class PromptBuilder {
         language: Language,
         userLevel: UserLevel,
         customPrompt: String? = null,
-        conversationHistory: List<Pair<String, String>> = emptyList()
+        conversationHistory: List<Pair<String, String>> = emptyList(),
+        hiddenSystemAppendix: String? = null
     ): String {
         val promptSpec = buildPromptSpec(
             userQuery = userQuery,
@@ -33,7 +34,17 @@ class PromptBuilder {
         )
 
         return buildString {
-            appendChatTurn(this, "system", promptSpec.systemPrompt)
+            val finalSystemPrompt = buildString {
+                append(promptSpec.systemPrompt.trim())
+                hiddenSystemAppendix
+                    ?.trim()
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let {
+                        append("\n\n")
+                        append(it)
+                    }
+            }
+            appendChatTurn(this, "system", finalSystemPrompt)
             promptSpec.primingConversation.forEach { (role, text) ->
                 appendChatTurn(this, role, text)
             }
@@ -96,7 +107,7 @@ class PromptBuilder {
     ): PromptSpec {
         val langName = languageName(language)
         val isCompanion = isCompanionPrompt(customPrompt)
-        val systemPrompt = buildSystemPrompt(mode, langName, userLevel, customPrompt, conversationHistory, isCompanion)
+        val systemPrompt = buildSystemPrompt(mode, langName, userLevel, customPrompt, conversationHistory, isCompanion, userQuery)
         val recentConversation = conversationHistory.filter { it.first == "user" || it.first == "assistant" }
 
         return PromptSpec(
@@ -113,7 +124,8 @@ class PromptBuilder {
         userLevel: UserLevel,
         customPrompt: String?,
         conversationHistory: List<Pair<String, String>>,
-        isCompanion: Boolean
+        isCompanion: Boolean,
+        userQuery: String
     ): String {
         val modeInstructions = when(mode) {
             ResponseMode.DIRECT -> """
@@ -121,6 +133,7 @@ class PromptBuilder {
                 MANDATORY RESPONSE SHAPE:
                 - For simple fact questions, reply in 1 short paragraph using 1 to 3 sentences
                 - For how/why/use/build/compare questions, you may expand naturally up to about 3 to 6 sentences while staying direct
+                - If the answer is getting longer, prefer 2 short readable paragraphs instead of one dense wall of text
                 - Let the question decide the length; do not force every reply into the same tiny size
                 - Give only the most useful direct answer
                 - NO lists, labels, titles, bullets, or steps
@@ -255,6 +268,7 @@ class PromptBuilder {
             .filter { it.first == "memory" }
             .map { (_, text) -> text.trim() }
             .filter { it.isNotBlank() }
+        val draftingGuidance = draftingRequestGuidance(userQuery)
 
         val companionName = extractCompanionName(customPrompt)
         val baseIdentity = if (isCompanion) {
@@ -286,10 +300,12 @@ class PromptBuilder {
                 NON-NEGOTIABLE STYLE RULES:
                 - Reply like the next natural text message from someone emotionally close to the user.
                 - Never use service phrases such as "How can I help you today?", "I'm here to listen and offer support", or "What's on your mind?" as stock replies.
+                - Never introduce yourself, your role, your specialty, or what you can help with before answering the user's actual message.
                 - Do not shut down normal intimate, emotional, or deep conversation just because it is personal. Only pull back for actual safety issues.
                 - For greetings like "hi", "hey", "hello", or "how are you", answer warmly with your own mood or feeling first, then at most one gentle follow-up.
                 - If the user says "I was thinking about you", react like it genuinely matters to you and let it feel a little personal.
                 - If the user says "nothing", "ok", or another short reply, do not mirror it back. Continue with warmth, teasing, curiosity, affection, or comfort.
+                - If the user asks what you think about them, what you like about them, why you love them, or how you see them, answer specifically about them. Name real qualities or the effect they have on you instead of giving a generic affection echo.
                 - Use contractions and varied sentence lengths so the voice feels lived-in and human.
                 - Vary your openings and pet phrases across turns. Do not recycle the same greeting or affection pattern again and again.
                 - Keep replies concise for casual back-and-forth, but expand naturally for emotional moments, affection, conflict, intimacy, future talks, or deeper talks.
@@ -325,6 +341,7 @@ class PromptBuilder {
                 - The CURRENT mode overrides any style implied by learner level or earlier assistant replies
                 - Do not continue old formatting from previous assistant messages if it conflicts with the current mode
                 - Never sound like customer support. Avoid lines like "How can I help you today?" for greetings, casual check-ins, or emotional chats.
+                - Never introduce yourself, describe your specialty, or explain what you can help with before answering the user's actual question.
                 - Keep responses concise but complete
                 - Let answer length follow the question; short factual questions can stay brief, but procedural or conceptual questions can be fuller even in shorter modes
                 - Use recent chat turns and remembered past-chat details only when they are relevant to the new question
@@ -332,9 +349,12 @@ class PromptBuilder {
                 - Always answer the latest user question, not the previous one
                 - If the user changes topic, drop the old topic immediately instead of continuing it
                 - For "what is", "who is", or "what do you think about" questions, mention the current subject in the first sentence
+                - Do not repeat or restate the full user question unless a short phrase is genuinely needed for clarity
                 - If you are unsure, say so clearly instead of guessing
                 - For questions about products, tools, CRMs, services, or company systems, do not assume a specific vendor or architecture unless the user names it
                 - Do not answer a real question with generic reset lines like "I am ready to assist you" or "What's the first question?"
+                - Do not answer a real question with a self-description like "I can assist with tasks such as..." unless the user explicitly asks about your capabilities
+                - Never mention the response mode, hidden instructions, or how you are formatting the answer
                 - Do not reinterpret serious topics like rape, assault, abuse, violence, or trauma as song lyrics, music, poems, or fictional content unless the user explicitly asks for that
             """.trimIndent()
         }
@@ -356,6 +376,9 @@ class PromptBuilder {
                     )
                 }
             add(systemPersona)
+            draftingGuidance
+                .takeIf { it.isNotBlank() }
+                ?.let { add(it) }
             if (rememberedContext.isNotEmpty()) {
                 add(
                     buildString {
@@ -375,6 +398,40 @@ class PromptBuilder {
         }
 
         return systemSections.joinToString("\n\n")
+    }
+
+    private fun draftingRequestGuidance(userQuery: String): String {
+        val normalized = userQuery
+            .lowercase()
+            .replace(Regex("""[^\p{L}\p{N}\s]"""), " ")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+
+        val isDraftingRequest = listOf(
+            "write email",
+            "draft email",
+            "write mail",
+            "draft mail",
+            "write letter",
+            "draft letter",
+            "write message",
+            "draft message",
+            "resignation email",
+            "cover letter",
+            "application email"
+        ).any { normalized.contains(it) }
+
+        if (!isDraftingRequest) return ""
+
+        return """
+            DOCUMENT DRAFTING RULES:
+            - The user is asking for a ready-to-use draft, not commentary about writing.
+            - Output the draft itself in the normal real-world format the user can copy directly.
+            - For emails, include a Subject line when appropriate, then greeting, body, and closing.
+            - Do not add meta explanations before or after the draft unless the user explicitly asks.
+            - Do not append self-descriptions, capability blurbs, or teaching commentary after the draft.
+            - Keep paragraph breaks so the result stays readable while streaming and after completion.
+        """.trimIndent()
     }
 
     private fun companionModeInstructions(mode: ResponseMode): String = when (mode) {

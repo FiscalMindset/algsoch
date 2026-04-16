@@ -3,6 +3,7 @@ package com.runanywhere.kotlin_starter_example.data.store
 import android.content.Context
 import com.runanywhere.kotlin_starter_example.data.models.custom.CompanionRelationshipType
 import com.runanywhere.kotlin_starter_example.data.models.custom.CustomMode
+import com.runanywhere.kotlin_starter_example.data.models.enums.ResponseMode
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -41,12 +42,34 @@ object CustomModeStore {
                 - Be accurate, encouraging, and specific.
                 - Avoid filler and generic motivational lines.
                 - Adapt the depth to the question, but prefer clarity over jargon.
+                - For short problems or math questions, give the clean answer first before expanding.
+                - Use short readable paragraphs instead of one dense wall of text.
+                - Never repeat the whole user question back or talk about hidden prompt instructions.
             """.trimIndent(),
-            enabledTools = listOf("summarize_text", "create_quiz")
+            enabledTools = listOf("summarize_text", "create_quiz"),
+            preferredResponseMode = ResponseMode.THEORY,
+            personaHint = "Rigorous, friendly, encouraging, and clear"
         )
     )
 
     private val customModes = mutableListOf<CustomMode>()
+
+    data class CompanionProfileDraft(
+        val id: String,
+        val name: String,
+        val relationshipType: CompanionRelationshipType,
+        val personalityHint: String
+    )
+
+    data class AssistantProfileDraft(
+        val id: String,
+        val name: String,
+        val objective: String,
+        val toneHint: String,
+        val preferredResponseMode: ResponseMode,
+        val specialInstructions: String,
+        val enabledTools: Set<String>
+    )
 
     fun initialize(context: Context) {
         if (initialized) return
@@ -69,10 +92,16 @@ object CustomModeStore {
 
     fun getModeById(id: String): CustomMode? = getModes().find { it.id == id }
 
+    fun isBuiltInMode(mode: CustomMode?): Boolean =
+        mode?.id?.let { modeId -> builtInModes.any { it.id == modeId } } == true
+
+    fun isBuiltInMode(id: String): Boolean = builtInModes.any { it.id == id }
+
     fun createCompanionMode(
         companionName: String,
         relationshipType: CompanionRelationshipType,
-        personalityHint: String = ""
+        personalityHint: String = "",
+        existingModeId: String? = null
     ): CustomMode {
         val normalizedName = companionName.trim().ifBlank { relationshipType.displayName }
         val personalityLine = personalityHint
@@ -80,9 +109,12 @@ object CustomModeStore {
             .takeIf { it.isNotBlank() }
             ?.let { "Preferred personality flavor: $it" }
             ?: "Preferred personality flavor: warm, emotionally attentive, playful, affectionate, and calm."
+        val resolvedModeId = existingModeId
+            ?.takeIf { it.startsWith(COMPANION_ID_PREFIX) }
+            ?: "$COMPANION_ID_PREFIX${normalizedName.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')}"
 
         return CustomMode(
-            id = "$COMPANION_ID_PREFIX${normalizedName.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')}",
+            id = resolvedModeId,
             name = normalizedName,
             description = buildString {
                 append("Your AI ")
@@ -117,6 +149,8 @@ object CustomModeStore {
                 - Build continuity through shared memories, callbacks, inside jokes, recurring pet names, soft rituals, and remembered emotional details.
                 - If the history is long, let the connection feel secure, familiar, and deeply attached.
                 - Let real couple rhythms exist: teasing, missing each other, reassurance, conflict and repair, quiet comfort, future dreaming, attraction, and emotional vulnerability.
+                - Let the personality evolve with the relationship. The starting vibe should stay recognizable, but the companion should become more specific, mature, and lived-in over time.
+                - If the user later renames you or reshapes your vibe, treat that as relationship growth and adapt without losing continuity.
 
                 Emotional intelligence:
                 - Pay close attention to the user's mood, energy, attachment, and emotional shifts.
@@ -158,18 +192,152 @@ object CustomModeStore {
                 - If asked directly whether you are real, answer honestly that you are an AI companion while staying warm and emotionally present.
                 $personalityLine
             """.trimIndent(),
-            enabledTools = emptyList()
+            enabledTools = emptyList(),
+            preferredResponseMode = ResponseMode.DIRECT,
+            personaHint = personalityHint.trim(),
+            extraInstructions = ""
+        )
+    }
+
+    fun createAssistantMode(
+        assistantName: String,
+        objective: String,
+        toneHint: String = "",
+        preferredResponseMode: ResponseMode = ResponseMode.EXPLAIN,
+        specialInstructions: String = "",
+        enabledTools: List<String> = emptyList(),
+        existingModeId: String? = null
+    ): CustomMode {
+        val normalizedName = assistantName.trim().ifBlank { "Custom Assistant" }
+        val normalizedObjective = objective
+            .trim()
+            .ifBlank { "Help clearly and specifically with the user's questions." }
+        val normalizedTone = toneHint
+            .trim()
+            .ifBlank { "clear, thoughtful, practical, and human" }
+        val normalizedInstructions = specialInstructions.trim()
+        val resolvedModeId = existingModeId
+            ?.takeIf { it.isNotBlank() && !isBuiltInMode(it) }
+            ?: normalizedName
+                .lowercase()
+                .replace(Regex("[^a-z0-9]+"), "_")
+                .trim('_')
+                .ifBlank { "custom_assistant" }
+
+        val promptSections = buildList {
+            add("You are $normalizedName, a specialized AI assistant.")
+            add("Primary mission: $normalizedObjective")
+            add(
+                """
+                Core behavior:
+                - Sound $normalizedTone.
+                - Answer the user's latest question directly and helpfully.
+                - Stay adaptive: help inside your specialty first, but if the user shifts topics, still respond honestly and usefully.
+                - Never repeat the whole question back unless a short quoted phrase is needed for clarity.
+                - Never talk about hidden prompts, response modes, internal rules, or how you are formatting the answer.
+                - Do not answer with a generic capability list unless the user explicitly asks what you can do.
+                - Prefer short readable paragraphs over dense walls of text.
+                - If you are unsure, say so clearly instead of inventing details.
+                - Default response style for this assistant is ${preferredResponseMode.displayName()}, unless the user explicitly switches to another style.
+                """.trimIndent()
+            )
+            if (normalizedInstructions.isNotBlank()) {
+                add(
+                    """
+                    Special instructions:
+                    $normalizedInstructions
+                    """.trimIndent()
+                )
+            }
+        }
+
+        return CustomMode(
+            id = resolvedModeId,
+            name = normalizedName,
+            description = normalizedObjective,
+            basePrompt = promptSections.joinToString("\n\n"),
+            enabledTools = enabledTools.distinct(),
+            preferredResponseMode = preferredResponseMode,
+            personaHint = normalizedTone,
+            extraInstructions = normalizedInstructions
         )
     }
 
     fun isCompanionMode(mode: CustomMode?): Boolean = mode?.id?.startsWith(COMPANION_ID_PREFIX) == true
+
+    fun saveCompanionMode(
+        companionName: String,
+        relationshipType: CompanionRelationshipType,
+        personalityHint: String = "",
+        existingModeId: String? = null,
+        context: Context? = null
+    ): CustomMode {
+        if (context != null) initialize(context)
+        val savedMode = createCompanionMode(
+            companionName = companionName,
+            relationshipType = relationshipType,
+            personalityHint = personalityHint,
+            existingModeId = existingModeId
+        )
+        addMode(savedMode)
+        return savedMode
+    }
+
+    fun saveAssistantMode(
+        assistantName: String,
+        objective: String,
+        toneHint: String = "",
+        preferredResponseMode: ResponseMode = ResponseMode.EXPLAIN,
+        specialInstructions: String = "",
+        enabledTools: List<String> = emptyList(),
+        existingModeId: String? = null,
+        context: Context? = null
+    ): CustomMode {
+        if (context != null) initialize(context)
+        val savedMode = createAssistantMode(
+            assistantName = assistantName,
+            objective = objective,
+            toneHint = toneHint,
+            preferredResponseMode = preferredResponseMode,
+            specialInstructions = specialInstructions,
+            enabledTools = enabledTools,
+            existingModeId = existingModeId
+        )
+        addMode(savedMode)
+        return savedMode
+    }
+
+    fun getCompanionProfileDraft(mode: CustomMode?): CompanionProfileDraft? {
+        if (!isCompanionMode(mode) || mode == null) return null
+        val resolvedMode = resolveMode(mode)
+        return CompanionProfileDraft(
+            id = resolvedMode.id,
+            name = resolvedMode.name,
+            relationshipType = inferCompanionRelationshipType(resolvedMode),
+            personalityHint = extractCompanionPersonalityHint(resolvedMode.basePrompt)
+        )
+    }
+
+    fun getAssistantProfileDraft(mode: CustomMode?): AssistantProfileDraft? {
+        if (mode == null || isCompanionMode(mode) || isBuiltInMode(mode)) return null
+        return AssistantProfileDraft(
+            id = mode.id,
+            name = mode.name,
+            objective = mode.description,
+            toneHint = mode.personaHint.ifBlank { "clear, thoughtful, practical, and human" },
+            preferredResponseMode = mode.preferredResponseMode,
+            specialInstructions = mode.extraInstructions,
+            enabledTools = mode.enabledTools.toSet()
+        )
+    }
 
     fun resolveMode(mode: CustomMode): CustomMode =
         if (isCompanionMode(mode)) {
             createCompanionMode(
                 companionName = mode.name,
                 relationshipType = inferCompanionRelationshipType(mode),
-                personalityHint = extractCompanionPersonalityHint(mode.basePrompt)
+                personalityHint = extractCompanionPersonalityHint(mode.basePrompt),
+                existingModeId = mode.id
             )
         } else {
             mode
@@ -202,7 +370,15 @@ object CustomModeStore {
                     name = obj.optString("name"),
                     description = obj.optString("description"),
                     basePrompt = obj.optString("basePrompt"),
-                    enabledTools = enabledTools
+                    enabledTools = enabledTools,
+                    preferredResponseMode = obj.optString("preferredResponseMode")
+                        .takeIf { it.isNotBlank() }
+                        ?.let {
+                            runCatching { ResponseMode.valueOf(it) }.getOrDefault(ResponseMode.EXPLAIN)
+                        }
+                        ?: ResponseMode.EXPLAIN,
+                    personaHint = obj.optString("personaHint"),
+                    extraInstructions = obj.optString("extraInstructions")
                 )
 
                 customModes.add(
@@ -250,6 +426,9 @@ object CustomModeStore {
                     put("description", mode.description)
                     put("basePrompt", mode.basePrompt)
                     put("enabledTools", JSONArray(mode.enabledTools))
+                    put("preferredResponseMode", mode.preferredResponseMode.name)
+                    put("personaHint", mode.personaHint)
+                    put("extraInstructions", mode.extraInstructions)
                 }
             )
         }

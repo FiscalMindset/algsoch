@@ -37,6 +37,9 @@ fun AlgsochModeSelectionScreen(
     val context = LocalContext.current
     var showCustomModeDialog by remember { mutableStateOf(false) }
     var showCompanionDialog by remember { mutableStateOf(false) }
+    var editingCustomMode by remember { mutableStateOf<CustomMode?>(null) }
+    var editingCompanionMode by remember { mutableStateOf<CustomMode?>(null) }
+    var pendingDeleteMode by remember { mutableStateOf<CustomMode?>(null) }
 
     LaunchedEffect(Unit) {
         CustomModeStore.initialize(context.applicationContext)
@@ -145,7 +148,10 @@ fun AlgsochModeSelectionScreen(
             if (featuredCompanion != null) {
                 Spacer(Modifier.height(10.dp))
                 OutlinedButton(
-                    onClick = { showCompanionDialog = true },
+                    onClick = {
+                        editingCompanionMode = null
+                        showCompanionDialog = true
+                    },
                     shape = RoundedCornerShape(14.dp),
                     border = androidx.compose.foundation.BorderStroke(1.dp, AccentViolet)
                 ) {
@@ -172,7 +178,10 @@ fun AlgsochModeSelectionScreen(
                 )
                 
                 IconButton(
-                    onClick = { showCustomModeDialog = true },
+                    onClick = {
+                        editingCustomMode = null
+                        showCustomModeDialog = true
+                    },
                     modifier = Modifier.size(32.dp)
                 ) {
                     Icon(Icons.Rounded.AddCircle, null, tint = AccentViolet)
@@ -190,7 +199,28 @@ fun AlgsochModeSelectionScreen(
                     contentPadding = PaddingValues(bottom = 24.dp)
                 ) {
                     items(customModes) { mode ->
-                        AssistantItem(mode) { onChatSelected(mode.id) }
+                        AssistantItem(
+                            mode = mode,
+                            onEdit = if (!CustomModeStore.isBuiltInMode(mode)) {
+                                {
+                                    if (CustomModeStore.isCompanionMode(mode)) {
+                                        editingCompanionMode = mode
+                                        showCompanionDialog = true
+                                    } else {
+                                        editingCustomMode = mode
+                                        showCustomModeDialog = true
+                                    }
+                                }
+                            } else {
+                                null
+                            },
+                            onDelete = if (!CustomModeStore.isBuiltInMode(mode)) {
+                                { pendingDeleteMode = mode }
+                            } else {
+                                null
+                            },
+                            onClick = { onChatSelected(mode.id) }
+                        )
                     }
                 }
             }
@@ -199,22 +229,76 @@ fun AlgsochModeSelectionScreen(
 
     if (showCustomModeDialog) {
         CustomAssistantDialog(
-            onDismiss = { showCustomModeDialog = false },
-            onSave = { mode ->
-                CustomModeStore.addMode(mode)
+            existingMode = editingCustomMode,
+            onDismiss = {
                 showCustomModeDialog = false
+                editingCustomMode = null
+            },
+            onSave = { mode ->
+                showCustomModeDialog = false
+                editingCustomMode = null
                 onChatSelected(mode.id)
+            },
+            onDelete = { mode ->
+                pendingDeleteMode = mode
+                showCustomModeDialog = false
+                editingCustomMode = null
             }
         )
     }
 
     if (showCompanionDialog) {
         CompanionSetupDialog(
-            onDismiss = { showCompanionDialog = false },
-            onSave = { mode ->
-                CustomModeStore.addMode(mode)
+            existingMode = editingCompanionMode,
+            onDismiss = {
                 showCompanionDialog = false
+                editingCompanionMode = null
+            },
+            onSave = { mode ->
+                showCompanionDialog = false
+                editingCompanionMode = null
                 onChatSelected(mode.id)
+            },
+            onDelete = { mode ->
+                pendingDeleteMode = mode
+                showCompanionDialog = false
+                editingCompanionMode = null
+            }
+        )
+    }
+
+    pendingDeleteMode?.let { mode ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteMode = null },
+            containerColor = SurfaceSecondary,
+            title = {
+                Text(
+                    if (CustomModeStore.isCompanionMode(mode)) "Delete Companion?" else "Delete Assistant?",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    "This will remove ${mode.name} from your saved assistants.",
+                    color = TextMuted
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        CustomModeStore.removeMode(mode.id)
+                        pendingDeleteMode = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteMode = null }) {
+                    Text("Cancel", color = TextMuted)
+                }
             }
         )
     }
@@ -285,7 +369,12 @@ private fun MainActionCard(
 }
 
 @Composable
-private fun AssistantItem(mode: CustomMode, onClick: () -> Unit) {
+private fun AssistantItem(
+    mode: CustomMode,
+    onEdit: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
+    onClick: () -> Unit
+) {
     val isCompanion = CustomModeStore.isCompanionMode(mode)
     Card(
         onClick = onClick,
@@ -346,6 +435,18 @@ private fun AssistantItem(mode: CustomMode, onClick: () -> Unit) {
                         color = AccentCyan,
                         fontWeight = FontWeight.Bold
                     )
+                }
+            }
+
+            onEdit?.let { editAction ->
+                Spacer(Modifier.width(8.dp))
+                IconButton(onClick = editAction, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Rounded.Edit, null, tint = AccentBlue)
+                }
+            }
+            onDelete?.let { deleteAction ->
+                IconButton(onClick = deleteAction, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Rounded.DeleteOutline, null, tint = MaterialTheme.colorScheme.error)
                 }
             }
         }

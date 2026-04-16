@@ -84,6 +84,9 @@ fun AlgsochScreen(
     var showModelStatus by remember { mutableStateOf(false) }
     var showCustomModeDialog by remember { mutableStateOf(false) }
     var showCompanionDialog by remember { mutableStateOf(false) }
+    var editingCustomMode by remember { mutableStateOf<CustomMode?>(null) }
+    var editingCompanionMode by remember { mutableStateOf<CustomMode?>(null) }
+    var pendingDeleteMode by remember { mutableStateOf<CustomMode?>(null) }
     var showImageSourceSheet by remember { mutableStateOf(false) }
     
     // Image selection state
@@ -197,7 +200,12 @@ fun AlgsochScreen(
                     onCancel = { viewModel.cancelGeneration() },
                     onImageClick = { showImageSourceSheet = true },
                     onModeClick = { showModeSelector = true },
-                    selectedMode = viewModel.selectedCustomMode?.name ?: viewModel.selectedMode.displayName(),
+                    selectedMode = when {
+                        viewModel.selectedCustomMode != null && viewModel.hasManualResponseModeSelection ->
+                            "${viewModel.selectedCustomMode?.name} · ${viewModel.selectedMode.displayName()}"
+                        viewModel.selectedCustomMode != null -> viewModel.selectedCustomMode?.name.orEmpty()
+                        else -> viewModel.selectedMode.displayName()
+                    },
                     isGenerating = viewModel.isGenerating,
                     selectedImageUri = selectedImageUri,
                     selectedImageFocusMode = selectedImageFocusMode,
@@ -245,8 +253,34 @@ fun AlgsochScreen(
     if (showModeSelector) {
         PremiumModeSelectorSheet(
             viewModel = viewModel,
-            onCreateCustomMode = { showModeSelector = false; showCustomModeDialog = true },
-            onCreateCompanion = { showModeSelector = false; showCompanionDialog = true },
+            onCreateCustomMode = {
+                editingCustomMode = null
+                showModeSelector = false
+                showCustomModeDialog = true
+            },
+            onCreateCompanion = {
+                editingCompanionMode = null
+                showModeSelector = false
+                showCompanionDialog = true
+            },
+            onEditAssistant = { mode ->
+                editingCustomMode = mode
+                showModeSelector = false
+                showCustomModeDialog = true
+            },
+            onEditCompanion = { mode ->
+                editingCompanionMode = mode
+                showModeSelector = false
+                showCompanionDialog = true
+            },
+            onDeleteMode = { mode ->
+                pendingDeleteMode = mode
+                showModeSelector = false
+            },
+            onUseStandardChat = {
+                viewModel.clearActiveAssistant()
+                showModeSelector = false
+            },
             onDismiss = { showModeSelector = false }
         )
     }
@@ -267,22 +301,79 @@ fun AlgsochScreen(
 
     if (showCustomModeDialog) {
         CustomAssistantDialog(
-            onDismiss = { showCustomModeDialog = false },
-            onSave = { mode ->
-                CustomModeStore.addMode(mode)
+            existingMode = editingCustomMode,
+            onDismiss = {
                 showCustomModeDialog = false
+                editingCustomMode = null
+            },
+            onSave = { mode ->
+                showCustomModeDialog = false
+                editingCustomMode = null
                 viewModel.changeCustomMode(mode)
+            },
+            onDelete = { mode ->
+                pendingDeleteMode = mode
+                showCustomModeDialog = false
+                editingCustomMode = null
             }
         )
     }
 
     if (showCompanionDialog) {
         CompanionSetupDialog(
-            onDismiss = { showCompanionDialog = false },
-            onSave = { mode ->
-                CustomModeStore.addMode(mode)
+            existingMode = editingCompanionMode,
+            onDismiss = {
                 showCompanionDialog = false
+                editingCompanionMode = null
+            },
+            onSave = { mode ->
                 viewModel.changeCustomMode(mode)
+                showCompanionDialog = false
+                editingCompanionMode = null
+            },
+            onDelete = { mode ->
+                pendingDeleteMode = mode
+                showCompanionDialog = false
+                editingCompanionMode = null
+            }
+        )
+    }
+
+    pendingDeleteMode?.let { mode ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteMode = null },
+            containerColor = SurfaceSecondary,
+            title = {
+                Text(
+                    if (CustomModeStore.isCompanionMode(mode)) "Delete Companion?" else "Delete Assistant?",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    "This will remove ${mode.name} from your saved assistants. Existing chats stay in history, but this assistant profile will be deleted.",
+                    color = TextMuted
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        CustomModeStore.removeMode(mode.id)
+                        if (viewModel.selectedCustomMode?.id == mode.id) {
+                            viewModel.clearActiveAssistant()
+                        }
+                        pendingDeleteMode = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteMode = null }) {
+                    Text("Cancel", color = TextMuted)
+                }
             }
         )
     }
@@ -606,7 +697,15 @@ private fun AlgsochTopBar(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        viewModel.selectedCustomMode?.let { "AI Assistant" } ?: viewModel.selectedLevel.displayName(),
+                        when {
+                            viewModel.selectedCustomMode != null && viewModel.hasManualResponseModeSelection ->
+                                "${if (CustomModeStore.isCompanionMode(viewModel.selectedCustomMode)) "Companion" else "Assistant"} · ${viewModel.selectedMode.displayName()} style"
+                            CustomModeStore.isCompanionMode(viewModel.selectedCustomMode) ->
+                                "Companion chat"
+                            viewModel.selectedCustomMode != null ->
+                                "AI Assistant · ${viewModel.selectedCustomMode?.preferredResponseMode?.displayName() ?: ResponseMode.EXPLAIN.displayName()} by default"
+                            else -> viewModel.selectedLevel.displayName()
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = AccentBlue
                     )
@@ -1449,11 +1548,15 @@ private fun SenderBadge(label: String, isUser: Boolean) {
 
 private fun buildFormattedAssistantText(text: String): AnnotatedString = buildAnnotatedString {
     val inlineCodePattern = Regex("`([^`\n]+)`")
+    val boldPattern = Regex("""(\*\*|__)(.+?)\1""")
     val numberedTitlePattern = Regex("""^(\d+\.\s+[^:]{1,80}:)(\s*.*)$""")
     val bulletTitlePattern = Regex("""^(-\s+[^:]{1,80}:)(\s*.*)$""")
     val stepPattern = Regex("""^(Step\s+\d+:)(\s*.*)$""", RegexOption.IGNORE_CASE)
     val sectionPattern = Regex("""^(Tips:|Common Mistakes:|Summary:)(\s*.*)$""", RegexOption.IGNORE_CASE)
     val genericSectionPattern = Regex("""^([A-Z][A-Za-z ]{1,30}:)(\s*.*)$""")
+    val emailHeaderPattern = Regex("""^(Subject:|To:|From:|Date:)(\s*.*)$""", RegexOption.IGNORE_CASE)
+    val greetingPattern = Regex("""^(Dear\s.+,|Hi\s.+,|Hello\s.+,)$""", RegexOption.IGNORE_CASE)
+    val closingPattern = Regex("""^(Best regards,|Regards,|Sincerely,|Warmly,|Thanks,|Thank you,)$""", RegexOption.IGNORE_CASE)
     
     var currentIndex = 0
     val codeBlocks = assistantCodeBlockPattern.findAll(text).toList()
@@ -1463,7 +1566,19 @@ private fun buildFormattedAssistantText(text: String): AnnotatedString = buildAn
         // Add text before code block
         if (match.range.first > currentIndex) {
             val beforeText = text.substring(currentIndex, match.range.first)
-            processNormalText(beforeText, numberedTitlePattern, bulletTitlePattern, stepPattern, sectionPattern, genericSectionPattern, inlineCodePattern)
+            processNormalText(
+                beforeText,
+                numberedTitlePattern,
+                bulletTitlePattern,
+                stepPattern,
+                sectionPattern,
+                genericSectionPattern,
+                emailHeaderPattern,
+                greetingPattern,
+                closingPattern,
+                inlineCodePattern,
+                boldPattern
+            )
         }
         
         // Add code block with IDE-like syntax highlighting
@@ -1505,7 +1620,19 @@ private fun buildFormattedAssistantText(text: String): AnnotatedString = buildAn
     // Process remaining text after last code block
     if (currentIndex < text.length) {
         val remainingText = text.substring(currentIndex)
-        processNormalText(remainingText, numberedTitlePattern, bulletTitlePattern, stepPattern, sectionPattern, genericSectionPattern, inlineCodePattern)
+        processNormalText(
+            remainingText,
+            numberedTitlePattern,
+            bulletTitlePattern,
+            stepPattern,
+            sectionPattern,
+            genericSectionPattern,
+            emailHeaderPattern,
+            greetingPattern,
+            closingPattern,
+            inlineCodePattern,
+            boldPattern
+        )
     }
 }
 
@@ -1607,82 +1734,434 @@ private fun AnnotatedString.Builder.processNormalText(
     stepPattern: Regex,
     sectionPattern: Regex,
     genericSectionPattern: Regex,
-    inlineCodePattern: Regex
+    emailHeaderPattern: Regex,
+    greetingPattern: Regex,
+    closingPattern: Regex,
+    inlineCodePattern: Regex,
+    boldPattern: Regex
 ) {
-    val lines = text.lines()
-    
-    lines.forEachIndexed { index, rawLine ->
-        val line = rawLine.trimEnd()
-        when {
-            line.isBlank() -> Unit
-            numberedTitlePattern.matches(line) -> {
-                val match = numberedTitlePattern.find(line)!!
-                appendBoldSegment(match.groupValues[1])
-                processInlineCode(match.groupValues[2], inlineCodePattern)
+    val formattedText = formatReadableProseForDisplay(text)
+    val paragraphs = formattedText
+        .split(Regex("\\n\\s*\\n"))
+        .map { it.trimEnd() }
+        .filter { it.isNotBlank() }
+
+    paragraphs.forEachIndexed { paragraphIndex, paragraph ->
+        val lines = paragraph.lines()
+
+        lines.forEachIndexed { index, rawLine ->
+            val line = rawLine.trimEnd()
+            when {
+                line.isBlank() -> Unit
+                numberedTitlePattern.matches(line) -> {
+                    val match = numberedTitlePattern.find(line)!!
+                    appendBoldSegment(match.groupValues[1])
+                    processInlineCode(match.groupValues[2], inlineCodePattern, boldPattern)
+                }
+
+                bulletTitlePattern.matches(line) -> {
+                    val match = bulletTitlePattern.find(line)!!
+                    appendBoldSegment(match.groupValues[1])
+                    processInlineCode(match.groupValues[2], inlineCodePattern, boldPattern)
+                }
+
+                stepPattern.matches(line) -> {
+                    val match = stepPattern.find(line)!!
+                    appendBoldSegment(match.groupValues[1])
+                    processInlineCode(match.groupValues[2], inlineCodePattern, boldPattern)
+                }
+
+                sectionPattern.matches(line) -> {
+                    val match = sectionPattern.find(line)!!
+                    appendBoldSegment(match.groupValues[1])
+                    processInlineCode(match.groupValues[2], inlineCodePattern, boldPattern)
+                }
+
+                emailHeaderPattern.matches(line) -> {
+                    val match = emailHeaderPattern.find(line)!!
+                    appendHighlightedLabel(match.groupValues[1], AccentOrange)
+                    processInlineCode(match.groupValues[2], inlineCodePattern, boldPattern)
+                }
+
+                greetingPattern.matches(line) || closingPattern.matches(line) -> {
+                    appendHighlightedLabel(line, AccentOrange)
+                }
+
+                genericSectionPattern.matches(line) -> {
+                    val match = genericSectionPattern.find(line)!!
+                    appendBoldSegment(match.groupValues[1])
+                    processInlineCode(match.groupValues[2], inlineCodePattern, boldPattern)
+                }
+
+                else -> processLeadSentenceWithHighlight(line, inlineCodePattern, boldPattern)
             }
 
-            bulletTitlePattern.matches(line) -> {
-                val match = bulletTitlePattern.find(line)!!
-                appendBoldSegment(match.groupValues[1])
-                processInlineCode(match.groupValues[2], inlineCodePattern)
-            }
-
-            stepPattern.matches(line) -> {
-                val match = stepPattern.find(line)!!
-                appendBoldSegment(match.groupValues[1])
-                processInlineCode(match.groupValues[2], inlineCodePattern)
-            }
-
-            sectionPattern.matches(line) -> {
-                val match = sectionPattern.find(line)!!
-                appendBoldSegment(match.groupValues[1])
-                processInlineCode(match.groupValues[2], inlineCodePattern)
-            }
-
-            genericSectionPattern.matches(line) -> {
-                val match = genericSectionPattern.find(line)!!
-                appendBoldSegment(match.groupValues[1])
-                processInlineCode(match.groupValues[2], inlineCodePattern)
-            }
-
-            else -> processInlineCode(line, inlineCodePattern)
+            if (index < lines.lastIndex) append('\n')
         }
 
-        if (index < lines.lastIndex) append('\n')
+        if (paragraphIndex < paragraphs.lastIndex) append("\n\n")
     }
 }
 
-private fun AnnotatedString.Builder.processInlineCode(text: String, inlineCodePattern: Regex) {
+private fun AnnotatedString.Builder.processInlineCode(
+    text: String,
+    inlineCodePattern: Regex,
+    boldPattern: Regex
+) {
+    data class SegmentMatch(val start: Int, val end: Int, val type: String, val value: String)
+
     var currentIndex = 0
-    inlineCodePattern.findAll(text).forEach { match ->
-        // Add text before inline code
-        if (match.range.first > currentIndex) {
-            append(text.substring(currentIndex, match.range.first))
+    val matches = buildList {
+        inlineCodePattern.findAll(text).forEach { match ->
+            add(
+                SegmentMatch(
+                    start = match.range.first,
+                    end = match.range.last + 1,
+                    type = "code",
+                    value = match.groupValues[1]
+                )
+            )
         }
-        
-        // Add inline code with subtle styling (not orange, more subtle)
-        withStyle(SpanStyle(
-            background = Color(0xFF2A2A2A),
-            color = Color(0xFFD4D4D4),
-            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-            fontSize = 14.sp
-        )) {
-            append(" ${match.groupValues[1]} ")
+        boldPattern.findAll(text).forEach { match ->
+            add(
+                SegmentMatch(
+                    start = match.range.first,
+                    end = match.range.last + 1,
+                    type = "bold",
+                    value = match.groupValues[2]
+                )
+            )
         }
-        
-        currentIndex = match.range.last + 1
+    }.sortedBy { it.start }
+
+    matches.forEach { match ->
+        if (match.start < currentIndex) return@forEach
+        if (match.start > currentIndex) {
+            appendHighlightedPlainText(text.substring(currentIndex, match.start))
+        }
+
+        if (match.type == "code") {
+            withStyle(SpanStyle(
+                background = Color(0xFF2A2A2A),
+                color = Color(0xFFD4D4D4),
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                fontSize = 14.sp
+            )) {
+                append(" ${match.value} ")
+            }
+        } else {
+            appendWarmHighlight(match.value, ResponseHighlightTone.KEY_TERM)
+        }
+
+        currentIndex = match.end
     }
-    
-    // Add remaining text
+
     if (currentIndex < text.length) {
-        append(text.substring(currentIndex))
+        appendHighlightedPlainText(text.substring(currentIndex))
+    }
+}
+
+private fun AnnotatedString.Builder.processLeadSentenceWithHighlight(
+    text: String,
+    inlineCodePattern: Regex,
+    boldPattern: Regex
+) {
+    val sentences = text
+        .split(Regex("""(?<=[.!?])\s+"""))
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+
+    if (sentences.isEmpty()) return
+    if (sentences.size == 1 && text.length < 90) {
+        processInlineCode(text, inlineCodePattern, boldPattern)
+        return
+    }
+
+    val firstSentence = sentences.first()
+    if (shouldWarmHighlightLeadSentence(firstSentence, sentences.size)) {
+        appendWarmHighlight(firstSentence, ResponseHighlightTone.LEAD_SENTENCE)
+    } else {
+        processInlineCode(firstSentence, inlineCodePattern, boldPattern)
+    }
+
+    val remainder = text.removePrefix(firstSentence).trimStart()
+    if (remainder.isNotBlank()) {
+        append(' ')
+        processInlineCode(remainder, inlineCodePattern, boldPattern)
     }
 }
 
 private fun AnnotatedString.Builder.appendBoldSegment(text: String) {
-    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+    if (text.trim().endsWith(":")) {
+        appendWarmHighlight(text, ResponseHighlightTone.SECTION_LABEL)
+    } else {
+        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+            append(text)
+        }
+    }
+}
+
+private fun AnnotatedString.Builder.appendHighlightedLabel(text: String, color: Color) {
+    val tone = if (color == AccentOrange) {
+        ResponseHighlightTone.SECTION_LABEL
+    } else {
+        ResponseHighlightTone.KEY_TERM
+    }
+    appendWarmHighlight(text, tone)
+}
+
+private fun AnnotatedString.Builder.appendHighlightedPlainText(text: String) {
+    val spans = buildSmartHighlightSpans(text)
+    if (spans.isEmpty()) {
+        append(text)
+        return
+    }
+
+    var cursor = 0
+    spans.forEach { span ->
+        if (span.start > cursor) {
+            append(text.substring(cursor, span.start))
+        }
+        appendWarmHighlight(
+            text = text.substring(span.start, span.end),
+            tone = span.tone
+        )
+        cursor = span.end
+    }
+    if (cursor < text.length) {
+        append(text.substring(cursor))
+    }
+}
+
+private enum class ResponseHighlightTone {
+    SECTION_LABEL,
+    LEAD_SENTENCE,
+    KEY_TERM,
+    ANSWER_VALUE
+}
+
+private data class SmartHighlightSpan(
+    val start: Int,
+    val end: Int,
+    val tone: ResponseHighlightTone
+)
+
+private fun AnnotatedString.Builder.appendWarmHighlight(
+    text: String,
+    tone: ResponseHighlightTone
+) {
+    val style = when (tone) {
+        ResponseHighlightTone.SECTION_LABEL -> SpanStyle(
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFFFFD7B0),
+            background = AccentOrange.copy(alpha = 0.22f)
+        )
+
+        ResponseHighlightTone.LEAD_SENTENCE -> SpanStyle(
+            fontWeight = FontWeight.SemiBold,
+            color = Color(0xFFFFC28E),
+            background = AccentOrange.copy(alpha = 0.10f)
+        )
+
+        ResponseHighlightTone.KEY_TERM -> SpanStyle(
+            fontWeight = FontWeight.SemiBold,
+            color = Color(0xFFFFB374),
+            background = AccentOrange.copy(alpha = 0.09f)
+        )
+
+        ResponseHighlightTone.ANSWER_VALUE -> SpanStyle(
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFFFFE1C3),
+            background = AccentOrange.copy(alpha = 0.18f)
+        )
+    }
+
+    withStyle(style) {
         append(text)
     }
+}
+
+private fun buildSmartHighlightSpans(text: String): List<SmartHighlightSpan> {
+    if (text.isBlank()) return emptyList()
+
+    val spans = mutableListOf<SmartHighlightSpan>()
+
+    smartAnswerValuePattern.findAll(text).forEach { match ->
+        val group = match.groups[1] ?: return@forEach
+        val rawValue = group.value.trim()
+        val cleanedValue = rawValue.trimEnd('.', '!', '?', ',', ';', ':')
+        val wordCount = cleanedValue.split(Regex("\\s+")).count { it.isNotBlank() }
+        if (cleanedValue.length in 1..32 && wordCount <= 6) {
+            val offset = group.value.indexOf(cleanedValue)
+            val start = group.range.first + maxOf(0, offset)
+            val end = start + cleanedValue.length
+            spans.addNonOverlapping(SmartHighlightSpan(start, end, ResponseHighlightTone.ANSWER_VALUE))
+        }
+    }
+
+    smartCalloutPattern.findAll(text).forEach { match ->
+        val group = match.groups[2] ?: return@forEach
+        spans.addNonOverlapping(
+            SmartHighlightSpan(
+                start = group.range.first,
+                end = group.range.last + 1,
+                tone = ResponseHighlightTone.SECTION_LABEL
+            )
+        )
+    }
+
+    smartDefinitionHeadPattern.findAll(text).forEach { match ->
+        val group = match.groups[2] ?: return@forEach
+        val rawCandidate = group.value.trim()
+        val cleanedCandidate = rawCandidate.replace(Regex("""^(?i)(?:a|an|the)\s+"""), "").trim()
+        val normalized = cleanedCandidate.lowercase(Locale.ROOT)
+        val wordCount = cleanedCandidate.split(Regex("\\s+")).count { it.isNotBlank() }
+        if (
+            cleanedCandidate.length in 2..28 &&
+            wordCount <= 4 &&
+            normalized !in genericHighlightStopWords &&
+            "answer" !in normalized &&
+            "result" !in normalized
+        ) {
+            val offset = rawCandidate.indexOf(cleanedCandidate)
+            val start = group.range.first + maxOf(0, offset)
+            val end = start + cleanedCandidate.length
+            spans.addNonOverlapping(SmartHighlightSpan(start, end, ResponseHighlightTone.KEY_TERM))
+        }
+    }
+
+    return spans.sortedBy { it.start }
+}
+
+private fun MutableList<SmartHighlightSpan>.addNonOverlapping(span: SmartHighlightSpan) {
+    if (span.end <= span.start) return
+    val overlapsExisting = any { existing ->
+        maxOf(existing.start, span.start) < minOf(existing.end, span.end)
+    }
+    if (!overlapsExisting) {
+        add(span)
+    }
+}
+
+private fun shouldWarmHighlightLeadSentence(
+    firstSentence: String,
+    totalSentences: Int
+): Boolean {
+    val trimmed = firstSentence.trim()
+    if (trimmed.length !in 28..150 || totalSentences < 2) return false
+    return smartLeadSentencePattern.containsMatchIn(trimmed) ||
+        smartDefinitionSentencePattern.containsMatchIn(trimmed)
+}
+
+private val smartLeadSentencePattern = Regex(
+    pattern = """(?i)\b(in short|bottom line|overall|the key point|the main thing|what matters most|short answer|quick answer|the answer is|the result is|this means)\b"""
+)
+
+private val smartDefinitionSentencePattern = Regex(
+    pattern = """^[A-Za-z][A-Za-z0-9+/#'()\- ]{1,36}\s+(?:is|are|means|refers to|describes|works as|looks like|can be|stands for)\b""",
+    option = RegexOption.IGNORE_CASE
+)
+
+private val smartCalloutPattern = Regex(
+    pattern = """(^|[.!?]\s+|\n)(in short|bottom line|key point|key idea|main takeaway|takeaway|important|note|warning|remember this|quick answer|final answer|next step|best option)(?=[:,-]|\s)""",
+    options = setOf(RegexOption.MULTILINE, RegexOption.IGNORE_CASE)
+)
+
+private val smartDefinitionHeadPattern = Regex(
+    pattern = """(^|[.!?]\s+|\n)([A-Za-z][A-Za-z0-9+/#'()\- ]{0,34}?)(?=\s+(?:is|are|means|refers to|describes|works as|looks like|can be|stands for)\b)""",
+    options = setOf(RegexOption.MULTILINE, RegexOption.IGNORE_CASE)
+)
+
+private val smartAnswerValuePattern = Regex(
+    pattern = """(?i)\b(?:answer|result|value|total|sum|difference|solution|final answer)\s*(?:is|=|:)\s*([^,.;:\n]{1,36})"""
+)
+
+private val genericHighlightStopWords = setOf(
+    "it",
+    "this",
+    "that",
+    "there",
+    "here",
+    "i",
+    "you",
+    "we",
+    "they",
+    "he",
+    "she",
+    "the answer",
+    "a result",
+    "the result",
+    "the main idea",
+    "the key point",
+    "the takeaway",
+    "the short answer"
+)
+
+private fun formatReadableProseForDisplay(text: String): String {
+    val normalized = text
+        .replace("\r\n", "\n")
+        .replace('\r', '\n')
+        .trim('\n')
+
+    if (normalized.isBlank()) return normalized
+
+    val paragraphs = normalized
+        .split(Regex("\\n\\s*\\n"))
+        .flatMap { paragraph ->
+            val trimmed = paragraph.trim()
+            when {
+                trimmed.isBlank() -> emptyList()
+                looksStructuredDisplayParagraph(trimmed) -> listOf(trimmed)
+                else -> splitDenseDisplayParagraph(trimmed)
+            }
+        }
+
+    return paragraphs.joinToString("\n\n").trim()
+}
+
+private fun looksStructuredDisplayParagraph(text: String): Boolean =
+    text.lines().any { line ->
+        line.trim().matches(
+            Regex("""(?im)^(?:-|\d+\.|step\s+\d+:|tips:|common mistakes:|summary:|subject:|to:|from:|date:|dear\s|hi\s|hello\s|regards,|best regards,|sincerely,)""")
+        )
+    }
+
+private fun splitDenseDisplayParagraph(text: String): List<String> {
+    if (text.contains("\n")) {
+        return text.lines()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+    }
+
+    val sentences = text
+        .replace(Regex("""\s+"""), " ")
+        .split(Regex("""(?<=[.!?])\s+"""))
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+
+    if (sentences.size < 4 || text.length < 260) {
+        return listOf(text.trim())
+    }
+
+    val paragraphs = mutableListOf<String>()
+    val current = mutableListOf<String>()
+    var chars = 0
+
+    sentences.forEach { sentence ->
+        if (current.isNotEmpty() && current.size >= 2 && chars >= 170) {
+            paragraphs += current.joinToString(" ").trim()
+            current.clear()
+            chars = 0
+        }
+        current += sentence
+        chars += sentence.length
+    }
+
+    if (current.isNotEmpty()) {
+        paragraphs += current.joinToString(" ").trim()
+    }
+
+    return paragraphs.ifEmpty { listOf(text.trim()) }
 }
 
 @Composable
@@ -2104,6 +2583,10 @@ private fun PremiumModeSelectorSheet(
     viewModel: AlgsochViewModel,
     onCreateCustomMode: () -> Unit,
     onCreateCompanion: () -> Unit,
+    onEditAssistant: (CustomMode) -> Unit,
+    onEditCompanion: (CustomMode) -> Unit,
+    onDeleteMode: (CustomMode) -> Unit,
+    onUseStandardChat: () -> Unit,
     onDismiss: () -> Unit
 ) {
     ModalBottomSheet(
@@ -2121,7 +2604,11 @@ private fun PremiumModeSelectorSheet(
         ) {
             Text("Switch Mode", style = MaterialTheme.typography.headlineSmall, color = Color.White, fontWeight = FontWeight.Bold)
             Text(
-                "Choose the response style you want. Bigger cards make switching feel smoother and more touch-friendly on smaller screens.",
+                if (viewModel.selectedCustomMode != null) {
+                    "Choose the response style you want without leaving the active assistant. The assistant keeps its persona while these cards shape the reply style."
+                } else {
+                    "Choose the response style you want. Bigger cards make switching feel smoother and more touch-friendly on smaller screens."
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextSecondary,
                 lineHeight = 20.sp
@@ -2138,7 +2625,7 @@ private fun PremiumModeSelectorSheet(
             ).forEach { mode ->
                 ModeOptionCard(
                     mode = mode,
-                    isSelected = viewModel.selectedMode == mode && viewModel.selectedCustomMode == null,
+                    isSelected = viewModel.selectedMode == mode,
                     onClick = {
                         viewModel.changeMode(mode)
                         onDismiss()
@@ -2148,6 +2635,25 @@ private fun PremiumModeSelectorSheet(
 
             Spacer(Modifier.height(8.dp))
             Text("Your AI Assistants", style = MaterialTheme.typography.labelLarge, color = AccentViolet)
+
+            OutlinedButton(
+                onClick = {
+                    onUseStandardChat()
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (viewModel.selectedCustomMode == null) AccentBlue else Color.White.copy(alpha = 0.12f)
+                )
+            ) {
+                Icon(Icons.Rounded.AutoAwesome, null, tint = AccentBlue)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (viewModel.selectedCustomMode == null) "Using Standard Algsoch" else "Switch To Standard Algsoch",
+                    color = Color.White
+                )
+            }
 
             FilledTonalButton(
                 onClick = onCreateCompanion,
@@ -2166,7 +2672,21 @@ private fun PremiumModeSelectorSheet(
             CustomModeStore.getModes().forEach { mode ->
                 AssistantItemInSheet(
                     mode = mode,
-                    isSelected = viewModel.selectedCustomMode?.id == mode.id
+                    isSelected = viewModel.selectedCustomMode?.id == mode.id,
+                    onEdit = if (!CustomModeStore.isBuiltInMode(mode)) {
+                        if (CustomModeStore.isCompanionMode(mode)) {
+                            { onEditCompanion(mode) }
+                        } else {
+                            { onEditAssistant(mode) }
+                        }
+                    } else {
+                        null
+                    },
+                    onDelete = if (!CustomModeStore.isBuiltInMode(mode)) {
+                        { onDeleteMode(mode) }
+                    } else {
+                        null
+                    }
                 ) {
                     viewModel.changeCustomMode(mode)
                     onDismiss()
@@ -2190,7 +2710,13 @@ private fun PremiumModeSelectorSheet(
 }
 
 @Composable
-private fun AssistantItemInSheet(mode: CustomMode, isSelected: Boolean, onClick: () -> Unit) {
+private fun AssistantItemInSheet(
+    mode: CustomMode,
+    isSelected: Boolean,
+    onEdit: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
+    onClick: () -> Unit
+) {
     val isCompanion = CustomModeStore.isCompanionMode(mode)
     Surface(
         onClick = onClick,
@@ -2220,6 +2746,17 @@ private fun AssistantItemInSheet(mode: CustomMode, isSelected: Boolean, onClick:
             if (isSelected) {
                 Spacer(Modifier.width(12.dp))
                 Icon(Icons.Rounded.CheckCircle, null, tint = AccentViolet, modifier = Modifier.size(20.dp))
+            }
+            onEdit?.let { editAction ->
+                Spacer(Modifier.width(8.dp))
+                IconButton(onClick = editAction) {
+                    Icon(Icons.Rounded.Edit, null, tint = AccentBlue)
+                }
+            }
+            onDelete?.let { deleteAction ->
+                IconButton(onClick = deleteAction) {
+                    Icon(Icons.Rounded.DeleteOutline, null, tint = MaterialTheme.colorScheme.error)
+                }
             }
         }
     }

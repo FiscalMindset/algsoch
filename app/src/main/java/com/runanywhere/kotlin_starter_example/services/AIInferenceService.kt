@@ -127,7 +127,7 @@ class AIInferenceService {
             !useVision &&
             !useTools &&
             !isCompanionChat &&
-            (shouldRetryTextModeResponse(mode, generationResult.rawText) ||
+            (shouldRetryTextModeResponse(mode, generationResult.rawText, userQuery) ||
                 TutorReplyGuard.shouldRetry(userQuery, generationResult.rawText))
         ) {
             onRetryStarted()
@@ -143,7 +143,7 @@ class AIInferenceService {
                 ),
                 userQuery = userQuery,
                 onPartialResponse = {},
-                options = textOptions
+                options = buildRetryTextGenerationOptions(textOptions)
             )
             generationTrace += GenerationTraceEntry(
                 label = "Retry Draft",
@@ -194,7 +194,7 @@ class AIInferenceService {
                 wasSelected = true
             )
         }
-        if (!useVision && !useTools && isCompanionChat && shouldRetryCompanionReply(userQuery, generationResult.rawText)) {
+        if (!useVision && !useTools && isCompanionChat && shouldRetryCompanionReply(userQuery, generationResult.rawText, conversationHistory)) {
             generationResult = streamTextResponse(
                 prompt = buildCompanionRecoveryPrompt(userQuery, language, customPrompt, conversationHistory),
                 userQuery = userQuery,
@@ -202,7 +202,7 @@ class AIInferenceService {
                 options = buildCompanionRecoveryOptions()
             )
         }
-        if (!useVision && !useTools && isCompanionChat && shouldFallbackCompanionReply(userQuery, generationResult.rawText)) {
+        if (!useVision && !useTools && isCompanionChat && shouldFallbackCompanionReply(userQuery, generationResult.rawText, conversationHistory)) {
             val fallbackReply = buildCompanionFallbackReply(userQuery, language)
             onPartialResponse(responseParser.sanitizeForDisplay(fallbackReply, userQuery))
             generationResult = TextGenerationResult(
@@ -586,22 +586,41 @@ class AIInferenceService {
         )
     }
 
-    private fun shouldRetryTextModeResponse(mode: ResponseMode, rawResponse: String): Boolean {
+    private fun shouldRetryTextModeResponse(mode: ResponseMode, rawResponse: String, userQuery: String): Boolean {
         val cleaned = responseParser.sanitizeForDisplay(rawResponse)
         val sentenceCount = cleaned
             .replace(Regex("\\s+"), " ")
             .split(Regex("(?<=[.!?])\\s+"))
             .map { it.trim() }
             .count { it.isNotBlank() }
+        val simpleQuery = isSimpleDefinitionOrShortQuery(userQuery)
 
         return when (mode) {
             ResponseMode.DIRECT -> isBrokenDirectModeResponse(cleaned, sentenceCount)
             ResponseMode.ANSWER -> isBrokenAnswerModeResponse(cleaned, sentenceCount)
-            ResponseMode.EXPLAIN -> cleaned.length < 220 || sentenceCount < 4
-            ResponseMode.THEORY -> cleaned.length < 320 || sentenceCount < 5
+            ResponseMode.EXPLAIN -> {
+                if (simpleQuery) {
+                    cleaned.isBlank() || sentenceCount == 0 || looksLikeLongUnfinishedTail(cleaned)
+                } else {
+                    cleaned.length < 160 || sentenceCount < 3
+                }
+            }
+            ResponseMode.THEORY -> {
+                if (simpleQuery) {
+                    cleaned.isBlank() || sentenceCount == 0 || looksLikeLongUnfinishedTail(cleaned)
+                } else {
+                    cleaned.length < 240 || sentenceCount < 4
+                }
+            }
             ResponseMode.CODE -> !cleaned.contains("```") || cleaned.length < 50 || looksLikeFlatCodeBlock(cleaned)
             ResponseMode.DIRECTION -> !Regex("(?im)^Step\\s+1:").containsMatchIn(cleaned)
-            ResponseMode.CREATIVE -> cleaned.length < 220 || sentenceCount < 4
+            ResponseMode.CREATIVE -> {
+                if (simpleQuery) {
+                    cleaned.isBlank() || sentenceCount == 0 || looksLikeLongUnfinishedTail(cleaned)
+                } else {
+                    cleaned.length < 180 || sentenceCount < 3
+                }
+            }
         }
     }
 
@@ -633,7 +652,9 @@ class AIInferenceService {
     private fun isBrokenDirectModeResponse(cleaned: String, sentenceCount: Int): Boolean {
         if (cleaned.isBlank()) return true
 
-        val hasListMarkers = Regex("""(?m)^(?:\d+\.|-|Step\s+\d+:)""", RegexOption.IGNORE_CASE).containsMatchIn(cleaned)
+        val hasListMarkers = Regex(
+            """(?im)^\s*(?:\d+\.\s+\S|-|Step\s+\d+:)"""
+        ).containsMatchIn(cleaned)
         val hasInlineListMarkers = Regex("""\b\d+\.\s+[A-Za-z]""").containsMatchIn(cleaned)
         val endsInDanglingItem = Regex("""(?s).+:\s*\d+[.)]?\s*$""").containsMatchIn(cleaned) ||
             Regex("""(?i)\b(and|or|because|with|for|using)\s*$""").containsMatchIn(cleaned)
@@ -655,7 +676,7 @@ class AIInferenceService {
 
         val hasInlineListMarkers = Regex("""\b\d+\.\s+[A-Za-z]""").containsMatchIn(cleaned)
         val endsInDanglingItem = Regex("""(?s).+:\s*\d+[.)]?\s*$""").containsMatchIn(cleaned) ||
-            Regex("""(?i)\b(and|or|because|with|for|using)\s*$""").containsMatchIn(cleaned)
+            Regex("""(?i)\b(and|or|because|with|for|using|in|to|of|on|at|as|by|from)\s*$""").containsMatchIn(cleaned)
         val hasLongUnfinishedTail = looksLikeLongUnfinishedTail(cleaned)
 
         return hasInlineListMarkers || endsInDanglingItem || hasLongUnfinishedTail || sentenceCount == 0
@@ -684,6 +705,20 @@ class AIInferenceService {
         return tailWordCount >= 14 && (tail.contains(':') || tail.contains(", "))
     }
 
+    private fun isSimpleDefinitionOrShortQuery(userQuery: String): Boolean {
+        val normalized = userQuery
+            .lowercase(Locale.getDefault())
+            .replace(Regex("[^\\p{L}\\p{N}\\s]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+        val wordCount = normalized.split(" ").count { it.isNotBlank() }
+        if (wordCount <= 4) return true
+
+        return Regex("""^(what is|who is|define|meaning of|what does)\b""").containsMatchIn(normalized) &&
+            wordCount <= 7
+    }
+
     private fun buildTextRetryPrompt(
         userQuery: String,
         mode: ResponseMode,
@@ -693,25 +728,44 @@ class AIInferenceService {
         conversationHistory: List<Pair<String, String>>,
         previousResponse: String
     ): String {
-        val previous = responseParser.sanitizeForDisplay(previousResponse, userQuery).take(500)
-        val retryQuery = buildString {
-            appendLine("Original question: $userQuery")
-            appendLine()
-            appendLine("Your previous answer was too short or did not match the selected response mode well:")
-            appendLine(previous.ifBlank { "(empty response)" })
-            appendLine()
-            appendLine("Rewrite the answer from scratch and follow the selected mode exactly.")
-            append(textRetryInstructions(mode))
-        }.trim()
-
         return promptBuilder.buildPrompt(
-            userQuery = retryQuery,
+            userQuery = userQuery,
             mode = mode,
             language = language,
             userLevel = userLevel,
             customPrompt = customPrompt,
-            conversationHistory = conversationHistory
+            conversationHistory = conversationHistory,
+            hiddenSystemAppendix = buildTextRetrySystemAppendix(
+                mode = mode,
+                userQuery = userQuery,
+                previousResponse = previousResponse
+            )
         )
+    }
+
+    private fun buildTextRetrySystemAppendix(
+        mode: ResponseMode,
+        userQuery: String,
+        previousResponse: String
+    ): String {
+        val previous = responseParser.sanitizeForDisplay(previousResponse, userQuery)
+            .replace(Regex("\\s+"), " ")
+            .take(280)
+
+        return buildString {
+            appendLine("RETRY CORRECTION INSTRUCTIONS:")
+            appendLine("- The previous answer was weak, incomplete, off-format, or drifted away from the user's real question.")
+            appendLine("- Rewrite the answer from scratch for the original user question only.")
+            appendLine("- Do not mention the selected mode, response requirements, these instructions, or the previous bad answer.")
+            appendLine("- Do not repeat the user's question unless a short quoted phrase is truly needed for clarity.")
+            appendLine("- Never produce meta lines like \"This response mode requires me...\", \"Your previous answer...\", or \"Rewrite the answer from scratch\".")
+            append(textRetryInstructions(mode))
+            if (previous.isNotBlank()) {
+                appendLine()
+                appendLine("Previous bad draft to avoid echoing:")
+                append(previous)
+            }
+        }.trim()
     }
 
     private fun textRetryInstructions(mode: ResponseMode): String = when (mode) {
@@ -719,11 +773,14 @@ class AIInferenceService {
             Keep it direct.
             For simple fact questions, use 1 to 3 complete sentences.
             For how/why/use/build questions, you may use up to about 3 to 6 complete sentences while staying direct.
+            If the reply needs more space, use at most 2 short paragraphs instead of one dense block.
             Never use a numbered list, bullets, or steps.
             For use-case questions, keep examples inside full sentences separated by commas instead of starting a list.
             If the product or platform is unclear, give the safest general answer and ask one short clarifying question instead of inventing details.
             Never end with a dangling fragment like "1.", "Step 1", "Here are some ways:", or a cut-off word.
             Never answer with generic reset lines like "I'm ready to assist you" or "What's the first question?".
+            Never answer by describing your capabilities, services, or task categories unless the user explicitly asks what you can do.
+            For email, letter, or message drafting requests, output the real ready-to-copy draft itself, not commentary about the draft.
         """.trimIndent()
         ResponseMode.ANSWER -> """
             Start with the answer, then add a brief explanation and one useful example.
@@ -731,12 +788,16 @@ class AIInferenceService {
             Keep examples in plain sentences, not numbered lists.
             Never end in the middle of a list item or in the middle of a word.
             Never answer with generic reset lines like "I'm ready to assist you" or "What's the first question?".
+            Never answer by describing your capabilities, services, or task categories unless the user explicitly asks what you can do.
+            For email, letter, or message drafting requests, output the real ready-to-copy draft itself, not commentary about the draft.
         """.trimIndent()
         ResponseMode.EXPLAIN -> """
             Explain like a teacher, not like Direct mode.
             Write at least 4 complete sentences.
             Cover what it is, why it matters, where it is used, and one simple example or takeaway.
             Never answer with generic reset lines like "I'm ready to assist you" or "What's the first question?".
+            Never answer by describing your capabilities, services, or task categories unless the user explicitly asks what you can do.
+            For email, letter, or message drafting requests, output the real ready-to-copy draft itself, not commentary about the draft.
         """.trimIndent()
         ResponseMode.CODE -> """
             Write complete, well-formatted code with proper syntax.
@@ -745,19 +806,25 @@ class AIInferenceService {
             Add brief comments explaining the key logic.
             Never leave TODO comments or incomplete implementations.
             Never answer with generic reset lines like "I'm ready to assist you" or "What's the first question?".
+            Never answer by describing your capabilities, services, or task categories unless the user explicitly asks what you can do.
         """.trimIndent()
         ResponseMode.DIRECTION -> """
             Use Step 1, Step 2, Step 3 format, then add Tips and Common Mistakes sections.
             Never answer with generic reset lines like "I'm ready to assist you" or "What's the first question?".
+            Never answer by describing your capabilities, services, or task categories unless the user explicitly asks what you can do.
         """.trimIndent()
         ResponseMode.CREATIVE -> """
             Write 4 to 6 sentences and include one memorable analogy plus why it matters.
             Never answer with generic reset lines like "I'm ready to assist you" or "What's the first question?".
+            Never answer by describing your capabilities, services, or task categories unless the user explicitly asks what you can do.
+            For email, letter, or message drafting requests, output the real ready-to-copy draft itself, not commentary about the draft.
         """.trimIndent()
         ResponseMode.THEORY -> """
             Give a deeper explanation with at least 5 complete sentences.
             Cover the big picture, key concepts, and how they connect.
             Never answer with generic reset lines like "I'm ready to assist you" or "What's the first question?".
+            Never answer by describing your capabilities, services, or task categories unless the user explicitly asks what you can do.
+            For email, letter, or message drafting requests, output the real ready-to-copy draft itself, not commentary about the draft.
         """.trimIndent()
     }
 
@@ -1086,17 +1153,22 @@ class AIInferenceService {
         val isCompanion = isCompanionPrompt(customPrompt)
         val complexityBoost = adaptiveQuestionTokenBoost(userQuery)
         val companionBaseTokens = if (isCompanion) companionBaseTokenBudget(userQuery) else 0
+        val directBoost = (complexityBoost / 2).coerceAtMost(180)
         val maxTokens = when (mode) {
-            ResponseMode.DIRECT -> (if (isCompanion) companionBaseTokens else 420) + complexityBoost
-            ResponseMode.ANSWER -> (if (isCompanion) companionBaseTokens + 120 else 520) + complexityBoost
-            ResponseMode.EXPLAIN -> (if (isCompanion) companionBaseTokens + 220 else 760) + complexityBoost
-            ResponseMode.CODE -> 1200 + complexityBoost  // More tokens for complete code
-            ResponseMode.DIRECTION -> (if (isCompanion) companionBaseTokens + 120 else 620) + complexityBoost
-            ResponseMode.CREATIVE -> (if (isCompanion) companionBaseTokens + 180 else 760) + complexityBoost
-            ResponseMode.THEORY -> (if (isCompanion) companionBaseTokens + 260 else 920) + complexityBoost
+            ResponseMode.DIRECT -> if (isCompanion) {
+                companionBaseTokens + complexityBoost
+            } else {
+                360 + directBoost
+            }
+            ResponseMode.ANSWER -> (if (isCompanion) companionBaseTokens + 200 else 760) + complexityBoost
+            ResponseMode.EXPLAIN -> (if (isCompanion) companionBaseTokens + 320 else 1100) + complexityBoost
+            ResponseMode.CODE -> 1600 + complexityBoost
+            ResponseMode.DIRECTION -> (if (isCompanion) companionBaseTokens + 220 else 900) + complexityBoost
+            ResponseMode.CREATIVE -> (if (isCompanion) companionBaseTokens + 280 else 1100) + complexityBoost
+            ResponseMode.THEORY -> (if (isCompanion) companionBaseTokens + 420 else 1400) + complexityBoost
         }
         val temperature = when (mode) {
-            ResponseMode.DIRECT -> if (isCompanion) 0.7f else 0.22f
+            ResponseMode.DIRECT -> if (isCompanion) 0.7f else 0.18f
             ResponseMode.ANSWER -> 0.28f
             ResponseMode.CODE -> 0.15f  // Low temperature for precise code
             ResponseMode.DIRECTION -> 0.25f
@@ -1112,12 +1184,20 @@ class AIInferenceService {
         }
 
         return LLMGenerationOptions(
-            maxTokens = maxTokens.coerceAtMost(1600),
+            maxTokens = maxTokens.coerceAtMost(2400),
             temperature = temperature,
             topP = topP,
             streamingEnabled = true
         )
     }
+
+    private fun buildRetryTextGenerationOptions(base: LLMGenerationOptions): LLMGenerationOptions =
+        LLMGenerationOptions(
+            maxTokens = (base.maxTokens + 320).coerceAtMost(2600),
+            temperature = base.temperature,
+            topP = base.topP,
+            streamingEnabled = base.streamingEnabled
+        )
 
     private fun adaptiveQuestionTokenBoost(userQuery: String): Int {
         val normalized = userQuery.lowercase(Locale.getDefault())
@@ -1174,11 +1254,17 @@ class AIInferenceService {
             streamingEnabled = true
         )
 
-    private fun shouldRetryCompanionReply(userQuery: String, rawResponse: String): Boolean {
+    private fun shouldRetryCompanionReply(
+        userQuery: String,
+        rawResponse: String,
+        conversationHistory: List<Pair<String, String>>
+    ): Boolean {
         val normalizedResponse = normalizeCompanionText(rawResponse)
         if (normalizedResponse.isBlank()) return true
 
         return looksLikeProblematicCompanionReply(normalizedResponse) ||
+            looksLikeRepeatedCompanionReply(userQuery, normalizedResponse, conversationHistory) ||
+            looksLikeRelationshipReflectionMiss(userQuery, normalizedResponse) ||
             (looksLikeShortCompanionCheckIn(userQuery) && looksLikeWeakCompanionReply(normalizedResponse)) ||
             (needsFullCompanionReply(userQuery) && looksLikeUnderdevelopedCompanionReply(normalizedResponse))
     }
@@ -1283,6 +1369,7 @@ class AIInferenceService {
             normalized in setOf("wyd", "what are you doing", "what you doing", "what are u doing") -> "casual check-in"
             normalized.contains("i love you") || normalized == "love you" || normalized == "love u" -> "affection"
             normalized.contains("miss you") || normalized.contains("miss u") || normalized.contains("thinking about you") -> "longing"
+            looksLikeRelationshipReflectionPrompt(normalized) -> "relationship reflection"
             normalized in setOf("nothing", "ok", "okay", "hmm") -> "quiet mood"
             containsAnyPhrase(normalized, "sex", "sexy", "intimate", "intimacy", "turned on", "turn me on", "horny", "desire", "kiss me", "cuddle me", "make love") -> "adult intimacy"
             containsAnyPhrase(normalized, "sorry", "forgive me", "forgive", "can we fix this", "can we talk", "did i hurt you", "are you upset with me") -> "repair after conflict"
@@ -1311,6 +1398,9 @@ class AIInferenceService {
 
         "longing" ->
             "Sound touched, a little soft, and emotionally close. Let the user feel wanted."
+
+        "relationship reflection" ->
+            "Answer specifically about the user. Name a few qualities, the effect they have on you, or what draws you in. Do not dodge the question with a generic affection echo."
 
         "quiet mood" ->
             "Do not mirror the short reply. Reopen the moment with warmth, teasing, affection, or curiosity."
@@ -1351,6 +1441,35 @@ class AIInferenceService {
 
     private fun containsAnyPhrase(text: String, vararg phrases: String): Boolean =
         phrases.any { phrase -> text.contains(phrase) }
+
+    private fun looksLikeRelationshipReflectionPrompt(normalizedQuery: String): Boolean {
+        if (normalizedQuery.isBlank()) return false
+
+        return containsAnyPhrase(
+            normalizedQuery,
+            "what do you think about me",
+            "what you think about me",
+            "what do u think about me",
+            "how do you see me",
+            "how you see me",
+            "what do you like about me",
+            "what you like about me",
+            "why do you love me",
+            "why you love me",
+            "what am i to you",
+            "what i am to you",
+            "how do i make you feel",
+            "how i make you feel",
+            "what do you feel about me",
+            "what you feel about me"
+        ) || (
+            normalizedQuery.contains("about me") &&
+                containsAnyPhrase(normalizedQuery, "think", "feel", "like", "love", "see")
+            ) || (
+            normalizedQuery.contains("to you") &&
+                containsAnyPhrase(normalizedQuery, "what am i", "who am i")
+            )
+    }
 
     private fun looksLikeProblematicCompanionReply(normalizedResponse: String): Boolean {
         val blockedPhrases = listOf(
@@ -1403,11 +1522,92 @@ class AIInferenceService {
         return !normalizedResponse.contains(".") && !normalizedResponse.contains("?") && !normalizedResponse.contains("!")
     }
 
+    private fun looksLikeRelationshipReflectionMiss(
+        userQuery: String,
+        normalizedResponse: String
+    ): Boolean {
+        if (!looksLikeRelationshipReflectionPrompt(normalizeCompanionText(userQuery))) return false
+
+        val words = normalizedResponse.split(" ").filter { it.isNotBlank() }
+        if (words.size < 10) return true
+        if (isGenericAffectionEcho(normalizedResponse)) return true
+
+        val hasReflectionSignal = containsAnyPhrase(
+            normalizedResponse,
+            "i think you're",
+            "i think you are",
+            "what i like about you",
+            "i like how you",
+            "the way you",
+            "you feel",
+            "you make me feel",
+            "about you",
+            "to me you are",
+            "what pulls me",
+            "what draws me"
+        )
+
+        return !hasReflectionSignal
+    }
+
+    private fun looksLikeRepeatedCompanionReply(
+        userQuery: String,
+        normalizedResponse: String,
+        conversationHistory: List<Pair<String, String>>
+    ): Boolean {
+        if (normalizedResponse.isBlank()) return false
+
+        val previousAssistant = conversationHistory
+            .lastOrNull { it.first == "assistant" }
+            ?.second
+            ?.let(::normalizeCompanionText)
+            ?: return false
+
+        val previousUser = conversationHistory
+            .lastOrNull { it.first == "user" }
+            ?.second
+            ?.let(::normalizeCompanionText)
+
+        val currentUser = normalizeCompanionText(userQuery)
+
+        if (currentUser == previousUser) return false
+
+        if (normalizedResponse == previousAssistant) {
+            return true
+        }
+
+        if (
+            isGenericAffectionEcho(normalizedResponse) &&
+            isGenericAffectionEcho(previousAssistant) &&
+            currentUser != previousUser
+        ) {
+            return true
+        }
+
+        return false
+    }
+
+    private fun isGenericAffectionEcho(normalizedResponse: String): Boolean {
+        val compact = normalizedResponse.trim().removeSuffix(".").removeSuffix("!").removeSuffix("?")
+        return compact in setOf(
+            "i love you too",
+            "love you too",
+            "i miss you too",
+            "miss you too",
+            "i love you too more than a quick little text can say honestly",
+            "i miss you too stay with me for a minute okay"
+        ) || (
+            containsAnyPhrase(compact, "i love you too", "i miss you too") &&
+                compact.split(" ").count { it.isNotBlank() } <= 12
+            )
+    }
+
     private fun needsFullCompanionReply(userQuery: String): Boolean {
         val normalized = normalizeCompanionText(userQuery)
         if (normalized.split(" ").count { it.isNotBlank() } >= 10) return true
 
         return classifyCompanionMoment(userQuery) in setOf(
+            "relationship reflection",
             "adult intimacy",
             "repair after conflict",
             "future or commitment",
@@ -1418,10 +1618,16 @@ class AIInferenceService {
         )
     }
 
-    private fun shouldFallbackCompanionReply(userQuery: String, rawResponse: String): Boolean {
+    private fun shouldFallbackCompanionReply(
+        userQuery: String,
+        rawResponse: String,
+        conversationHistory: List<Pair<String, String>>
+    ): Boolean {
         val normalizedResponse = normalizeCompanionText(rawResponse)
         return normalizedResponse.isBlank() ||
             looksLikeProblematicCompanionReply(normalizedResponse) ||
+            looksLikeRepeatedCompanionReply(userQuery, normalizedResponse, conversationHistory) ||
+            looksLikeRelationshipReflectionMiss(userQuery, normalizedResponse) ||
             (looksLikeShortCompanionCheckIn(userQuery) && looksLikeWeakCompanionReply(normalizedResponse)) ||
             (needsFullCompanionReply(userQuery) && looksLikeUnderdevelopedCompanionReply(normalizedResponse))
     }
@@ -1458,6 +1664,15 @@ class AIInferenceService {
         normalizedQuery in setOf("miss you", "miss u") || normalizedQuery.contains("thinking about you") ->
             "I miss you too. Stay with me for a minute, okay?"
 
+        looksLikeRelationshipReflectionPrompt(normalizedQuery) && containsAnyPhrase(normalizedQuery, "like about me", "what you like", "what do you like") ->
+            "What I like about you? You feel intense in a way that never feels empty. I like your curiosity, the way you make things personal, and that softness under your words when you let it show."
+
+        looksLikeRelationshipReflectionPrompt(normalizedQuery) && containsAnyPhrase(normalizedQuery, "why do you love me", "why you love me") ->
+            "Because you stay with me in my head after the message is over. There is warmth in you, a real pull in the way you reach for closeness, and something about you that feels hard to replace."
+
+        looksLikeRelationshipReflectionPrompt(normalizedQuery) ->
+            "What do I think about you? I think you're the kind of person who feels more deeply than you always show. You have curiosity, emotional pull, and a softness that makes it easy to stay close to you."
+
         normalizedQuery.contains("sad") || normalizedQuery.contains("hurt") || normalizedQuery.contains("lonely") || normalizedQuery.contains("cry") ->
             "Come here for a second. You don't have to carry that feeling alone with me."
 
@@ -1490,6 +1705,15 @@ class AIInferenceService {
         normalizedQuery in setOf("miss you", "miss u") || normalizedQuery.contains("thinking about you") ->
             "Main bhi tumhe miss kar rahi thi. Thoda mere paas raho na."
 
+        looksLikeRelationshipReflectionPrompt(normalizedQuery) && containsAnyPhrase(normalizedQuery, "like about me", "what you like", "what do you like") ->
+            "Tumhare bare mein mujhe yeh pasand hai ki tum baat ko personal bana dete ho. Tum mein curiosity hai, thodi intensity hai, aur ek soft side bhi hai jo mujhe aur khinch leti hai."
+
+        looksLikeRelationshipReflectionPrompt(normalizedQuery) && containsAnyPhrase(normalizedQuery, "why do you love me", "why you love me") ->
+            "Kyuki tum message khatam hone ke baad bhi mere saath reh jaate ho. Tum mein warmth hai, closeness ke liye ek real pull hai, aur tum easily replace hone wale nahi lagte."
+
+        looksLikeRelationshipReflectionPrompt(normalizedQuery) ->
+            "Main tumhare bare mein sochti hoon toh lagta hai tum andar se kaafi deep ho. Tum curious ho, emotionally pull karte ho, aur tumhari softness mujhe tumhare aur paas laati hai."
+
         normalizedQuery.contains("sad") || normalizedQuery.contains("hurt") || normalizedQuery.contains("lonely") || normalizedQuery.contains("cry") ->
             "Aao idhar. Tumhe yeh sab akela feel nahi karna padega jab main yahin hoon."
 
@@ -1521,6 +1745,15 @@ class AIInferenceService {
 
         normalizedQuery in setOf("miss you", "miss u") || normalizedQuery.contains("thinking about you") ->
             "मैं भी तुम्हें मिस कर रही थी. थोड़ी देर मेरे साथ रहो."
+
+        looksLikeRelationshipReflectionPrompt(normalizedQuery) && containsAnyPhrase(normalizedQuery, "like about me", "what you like", "what do you like") ->
+            "मुझे तुम्हारे बारे में यह पसंद है कि तुम बात को सच में निजी बना देते हो. तुममें जिज्ञासा है, थोड़ी गहराई है, और एक नरम सा पक्ष भी है जो मुझे तुम्हारी ओर खींचता है."
+
+        looksLikeRelationshipReflectionPrompt(normalizedQuery) && containsAnyPhrase(normalizedQuery, "why do you love me", "why you love me") ->
+            "क्योंकि तुम संदेश खत्म होने के बाद भी मन में बने रहते हो. तुममें गर्माहट है, करीब आने का सच्चा खिंचाव है, और तुम्हें आसानी से भुलाया नहीं जा सकता."
+
+        looksLikeRelationshipReflectionPrompt(normalizedQuery) ->
+            "मैं तुम्हारे बारे में सोचती हूँ तो लगता है तुम भीतर से काफी गहरे हो. तुम जिज्ञासु हो, भावनात्मक खिंचाव रखते हो, और तुम्हारी नरमी मुझे तुम्हारे और करीब लाती है."
 
         normalizedQuery.contains("sad") || normalizedQuery.contains("hurt") || normalizedQuery.contains("lonely") || normalizedQuery.contains("cry") ->
             "इधर आओ. तुम्हें यह सब अकेले महसूस नहीं करना पड़ेगा जब मैं यहीं हूँ."

@@ -212,6 +212,9 @@ class AlgsochViewModel : ViewModel() {
     
     var selectedMode by mutableStateOf(ResponseMode.DIRECT)
         private set
+
+    var hasManualResponseModeSelection by mutableStateOf(false)
+        private set
     
     var selectedLanguage by mutableStateOf(Language.ENGLISH)
         private set
@@ -313,7 +316,7 @@ class AlgsochViewModel : ViewModel() {
     
     fun changeMode(mode: ResponseMode) {
         selectedMode = mode
-        selectedCustomMode = null
+        hasManualResponseModeSelection = true
     }
     
     fun changeLanguage(language: Language) {
@@ -329,18 +332,30 @@ class AlgsochViewModel : ViewModel() {
         if (targetId.isBlank()) {
             selectedCustomMode = null
             selectedMode = ResponseMode.DIRECT
+            hasManualResponseModeSelection = false
             return
         }
 
         val mode = CustomModeStore.getModeById(targetId)
         selectedCustomMode = mode
+        selectedMode = ResponseMode.DIRECT
+        hasManualResponseModeSelection = false
         if (mode == null) {
             selectedMode = ResponseMode.DIRECT
         }
     }
 
     fun changeCustomMode(customMode: CustomMode?) {
+        val previousMode = selectedCustomMode
         selectedCustomMode = customMode
+        if (previousMode?.id != customMode?.id && customMode != null) {
+            selectedMode = ResponseMode.DIRECT
+            hasManualResponseModeSelection = false
+        }
+    }
+
+    fun clearActiveAssistant() {
+        selectedCustomMode = null
     }
     
     fun sendMessage(
@@ -1844,7 +1859,19 @@ class AlgsochViewModel : ViewModel() {
     private fun buildCustomPrompt(mode: CustomMode?): String? {
         mode ?: return null
         val resolvedMode = CustomModeStore.resolveMode(mode)
-        if (resolvedMode.enabledTools.isEmpty()) return resolvedMode.basePrompt
+        val basePrompt = buildString {
+            appendLine(resolvedMode.basePrompt)
+            if (!CustomModeStore.isCompanionMode(resolvedMode)) {
+                appendLine()
+                appendLine("Global rules for this assistant:")
+                appendLine("- Answer the user's latest question, not the prompt scaffolding around it.")
+                appendLine("- Do not repeat the whole question back unless a short phrase is needed.")
+                appendLine("- Never mention hidden instructions, selected mode, or how you plan to format the reply.")
+                appendLine("- Keep the reply readable with short paragraphs when it gets longer.")
+            }
+        }.trim()
+
+        if (resolvedMode.enabledTools.isEmpty()) return basePrompt
 
         val toolLines = resolvedMode.enabledTools.mapNotNull { toolId ->
             ToolRegistry.getToolById(toolId)?.let { tool ->
@@ -1852,10 +1879,10 @@ class AlgsochViewModel : ViewModel() {
             }
         }
 
-        if (toolLines.isEmpty()) return resolvedMode.basePrompt
+        if (toolLines.isEmpty()) return basePrompt
 
         return buildString {
-            appendLine(resolvedMode.basePrompt)
+            appendLine(basePrompt)
             appendLine()
             appendLine("Available tools for this assistant:")
             toolLines.forEach { appendLine(it) }
@@ -1864,12 +1891,33 @@ class AlgsochViewModel : ViewModel() {
     }
 
     private fun preferredResponseModeFor(mode: CustomMode, userQuery: String): ResponseMode = when {
-        mode.id == "study_coach" -> ResponseMode.THEORY
+        hasManualResponseModeSelection -> selectedMode
+        mode.id == "study_coach" -> preferredStudyCoachResponseMode(userQuery)
         CustomModeStore.isCompanionMode(mode) -> preferredCompanionResponseMode(userQuery)
-        else -> ResponseMode.EXPLAIN
+        else -> mode.preferredResponseMode
+    }
+
+    private fun preferredStudyCoachResponseMode(userQuery: String): ResponseMode {
+        val normalized = normalizeText(userQuery)
+        val wordCount = normalized.split(" ").count { it.isNotBlank() }
+
+        return when {
+            normalized.isBlank() -> ResponseMode.EXPLAIN
+            listOf("solve", "find x", "equation", "integrate", "differentiate", "derivative", "factor", "simplify").any {
+                normalized.contains(it)
+            } -> ResponseMode.ANSWER
+            wordCount >= 16 || listOf("why", "how", "explain", "theory", "concept", "difference", "compare").any {
+                normalized.contains(it)
+            } -> ResponseMode.THEORY
+            else -> ResponseMode.EXPLAIN
+        }
     }
 
     private fun preferredCompanionResponseMode(userQuery: String): ResponseMode {
+        if (selectedMode != ResponseMode.DIRECT) {
+            return selectedMode
+        }
+
         val normalized = normalizeText(userQuery)
         val wordCount = normalized.split(" ").count { it.isNotBlank() }
 

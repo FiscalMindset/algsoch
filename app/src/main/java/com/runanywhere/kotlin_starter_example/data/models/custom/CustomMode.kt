@@ -10,5 +10,8 @@ data class CustomMode(
     val name: String, // User-friendly name
     val description: String, // What this mode does
     val basePrompt: String, // System prompt for the model
-    val enabledTools: List<String> = emptyList() // Tool/function names enabled for this mode
+    val enabledTools: List<String> = emptyList(), // Tool/function names enabled for this mode
+    val preferredResponseMode: ResponseMode = ResponseMode.EXPLAIN,
+    val personaHint: String = "",
+    val extraInstructions: String = ""
 )

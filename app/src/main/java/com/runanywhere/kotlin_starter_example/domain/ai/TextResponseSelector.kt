@@ -17,10 +17,18 @@ internal object TextResponseSelector {
         val retryScore = score(mode, userQuery, retryAttempt)
         val firstNeedsRetry = TutorReplyGuard.shouldRetry(userQuery, firstAttempt)
         val retryNeedsRetry = TutorReplyGuard.shouldRetry(userQuery, retryAttempt)
+        val cleanedFirst = parser.sanitizeForDisplay(firstAttempt, userQuery).trim()
+        val cleanedRetry = parser.sanitizeForDisplay(retryAttempt, userQuery).trim()
+        val firstLooksComplete = cleanedFirst.lastOrNull()?.let { it in ".!?\"'" } == true
+        val retryLooksComplete = cleanedRetry.lastOrNull()?.let { it in ".!?\"'" } == true
 
         return when {
             !firstNeedsRetry && retryNeedsRetry -> firstAttempt
             firstNeedsRetry && !retryNeedsRetry -> retryAttempt
+            !firstNeedsRetry && !retryNeedsRetry && firstLooksComplete && !retryLooksComplete -> firstAttempt
+            !firstNeedsRetry && !retryNeedsRetry && firstLooksComplete -> {
+                if (retryScore >= firstScore + 2.25) retryAttempt else firstAttempt
+            }
             retryScore >= firstScore + 1.25 -> retryAttempt
             else -> firstAttempt
         }
@@ -143,7 +151,7 @@ internal object TextResponseSelector {
         if (Regex("""\b\d+[.)]?$""").containsMatchIn(trimmed)) {
             penalty += 2.0
         }
-        if (Regex("""\b(and|or|because|so|then|with|using|for)$""").containsMatchIn(lowercase)) {
+        if (Regex("""\b(and|or|because|so|then|with|using|for|in|to|of|on|at|as|by|from)$""").containsMatchIn(lowercase)) {
             penalty += 1.8
         }
 
