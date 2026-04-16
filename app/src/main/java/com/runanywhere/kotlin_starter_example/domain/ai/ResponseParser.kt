@@ -798,7 +798,13 @@ class ResponseParser {
             Regex("""(?i)[^.?!\n]*\bmy\s+goal\s+is\s+to\s+provide\s+clear\s+and\s+concise\s+answers\b[^.?!\n]*[.?!]?"""),
             Regex("""(?i)[^.?!\n]*\bi(?:'m| am)\s+here\s+to\s+provide\s+clear\s+and\s+concise\s+explanations\b[^.?!\n]*[.?!]?"""),
             Regex("""(?i)[^.?!\n]*\bi(?:'m| am)\s+here\s+to\s+listen,\s*learn,\s*and\s+engage\b[^.?!\n]*[.?!]?"""),
-            Regex("""(?i)[^.?!\n]*\bspark\s+your\s+curiosity\s+and\s+encourage\s+critical\s+thinking\b[^.?!\n]*[.?!]?""")
+            Regex("""(?i)[^.?!\n]*\bspark\s+your\s+curiosity\s+and\s+encourage\s+critical\s+thinking\b[^.?!\n]*[.?!]?"""),
+            Regex("""(?i)[^.?!\n]*\bmy\s+name\s+is\s+[^.?!\n]{0,50}\s+and\s+i\s+am\s+(?:a\s+)?(?:virtual\s+)?ai\s+(?:companion|assistant)\b[^.?!\n]*[.?!]?"""),
+            Regex("""(?i)[^.?!\n]*\bi(?:'m| am)\s+(?:a\s+)?(?:virtual\s+)?ai\s+(?:companion|assistant)\b[^.?!\n]*[.?!]?"""),
+            Regex("""(?i)[^.?!\n]*\bdesigned\s+to\s+be\s+supportive\s+and\s+loving\b[^.?!\n]*[.?!]?"""),
+            Regex("""(?i)[^.?!\n]*\bi\s+can\s+definitely\s+adapt\s+to\s+our\s+conversation\s+style\b[^.?!\n]*[.?!]?"""),
+            Regex("""(?i)[^.?!\n]*\bi(?:'ll| will)\s+respond\s+as\s+[^.?!\n]{0,50}\s+would\b[^.?!\n]*[.?!]?"""),
+            Regex("""(?i)[^.?!\n]*\bwhat\s+would\s+you\s+like\s+to\s+talk\s+about\b[^.?!\n]*[.?!]?""")
         )
 
         blockedSentencePatterns.forEach { pattern ->

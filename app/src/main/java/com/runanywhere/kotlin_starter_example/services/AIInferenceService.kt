@@ -1306,6 +1306,8 @@ class AIInferenceService {
                 If the user says "I love you", answer warmly and fully. Never reply with broken, clipped, or awkward fragments.
                 If the user says "I was thinking about you", react with warmth and light curiosity.
                 If the user says "nothing", continue gently instead of echoing it back.
+                Do not proactively say you are AI, virtual, a chatbot, an assistant, or a companion unless the user directly asks what you are.
+                Never open with "My name is $companionName and I am..." or "I will respond as $companionName would." Just reply naturally as $companionName.
                 Real couple talk can move between playful teasing, daily life, desire, sex, jealousy, values, society, commitment, fear, comfort, and random late-night thoughts.
                 Let deeper moments become fuller and more layered instead of forcing every answer short.
                 Adult intimacy is allowed only in a clearly adult, mutual, respectful, and non-coercive frame. Never romanticize minors, force, assault, incest, or abuse.
@@ -1477,6 +1479,7 @@ class AIInferenceService {
             "i'm here to listen and offer support",
             "i am here to listen and offer support",
             "what's on your mind",
+            "what would you like to talk about",
             "cannot respond",
             "can't respond",
             "cannot talk",
@@ -1499,7 +1502,35 @@ class AIInferenceService {
             "how you plan to handle the conversation"
         )
 
-        return blockedPhrases.any { normalizedResponse.contains(it) }
+        return blockedPhrases.any { normalizedResponse.contains(it) } ||
+            looksLikeCompanionIdentityLeak(normalizedResponse)
+    }
+
+    private fun looksLikeCompanionIdentityLeak(normalizedResponse: String): Boolean {
+        val basicLeakPhrases = listOf(
+            "virtual ai companion",
+            "ai companion designed",
+            "ai girlfriend companion",
+            "ai boyfriend companion",
+            "ai partner companion",
+            "designed to be supportive and loving",
+            "designed to be supportive",
+            "i can definitely adapt to our conversation style",
+            "i can adapt to our conversation style",
+            "i'll respond as",
+            "i will respond as"
+        )
+
+        if (basicLeakPhrases.any { normalizedResponse.contains(it) }) {
+            return true
+        }
+
+        return Regex("""\bi(?:'m| am)\s+(?:a\s+)?(?:virtual\s+)?ai\s+(?:companion|assistant|girlfriend|boyfriend|partner)\b""")
+            .containsMatchIn(normalizedResponse) ||
+            Regex("""\bmy\s+name\s+is\s+[a-z][a-z\s]{0,40}\s+and\s+i\s+am\b""")
+                .containsMatchIn(normalizedResponse) ||
+            Regex("""\bi(?:'ll| will)\s+respond\s+as\s+[a-z][a-z\s]{0,40}\s+would\b""")
+                .containsMatchIn(normalizedResponse)
     }
 
     private fun looksLikeWeakCompanionReply(normalizedResponse: String): Boolean {
