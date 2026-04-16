@@ -1085,14 +1085,15 @@ class AIInferenceService {
     ): LLMGenerationOptions {
         val isCompanion = isCompanionPrompt(customPrompt)
         val complexityBoost = adaptiveQuestionTokenBoost(userQuery)
+        val companionBaseTokens = if (isCompanion) companionBaseTokenBudget(userQuery) else 0
         val maxTokens = when (mode) {
-            ResponseMode.DIRECT -> (if (isCompanion) 900 else 420) + complexityBoost
-            ResponseMode.ANSWER -> (if (isCompanion) 920 else 520) + complexityBoost
-            ResponseMode.EXPLAIN -> (if (isCompanion) 1080 else 760) + complexityBoost
+            ResponseMode.DIRECT -> (if (isCompanion) companionBaseTokens else 420) + complexityBoost
+            ResponseMode.ANSWER -> (if (isCompanion) companionBaseTokens + 120 else 520) + complexityBoost
+            ResponseMode.EXPLAIN -> (if (isCompanion) companionBaseTokens + 220 else 760) + complexityBoost
             ResponseMode.CODE -> 1200 + complexityBoost  // More tokens for complete code
-            ResponseMode.DIRECTION -> (if (isCompanion) 900 else 620) + complexityBoost
-            ResponseMode.CREATIVE -> (if (isCompanion) 1040 else 760) + complexityBoost
-            ResponseMode.THEORY -> (if (isCompanion) 1120 else 920) + complexityBoost
+            ResponseMode.DIRECTION -> (if (isCompanion) companionBaseTokens + 120 else 620) + complexityBoost
+            ResponseMode.CREATIVE -> (if (isCompanion) companionBaseTokens + 180 else 760) + complexityBoost
+            ResponseMode.THEORY -> (if (isCompanion) companionBaseTokens + 260 else 920) + complexityBoost
         }
         val temperature = when (mode) {
             ResponseMode.DIRECT -> if (isCompanion) 0.7f else 0.22f
@@ -1143,6 +1144,28 @@ class AIInferenceService {
         return complexity * 180
     }
 
+    private fun companionBaseTokenBudget(userQuery: String): Int {
+        val normalized = normalizeCompanionText(userQuery)
+        val wordCount = normalized.split(Regex("\\s+")).count { it.isNotBlank() }
+        val momentType = classifyCompanionMoment(userQuery)
+
+        return when {
+            looksLikeShortCompanionCheckIn(userQuery) -> 280
+            momentType in setOf(
+                "adult intimacy",
+                "repair after conflict",
+                "future or commitment",
+                "deep talk or worldview",
+                "vulnerability or overthinking",
+                "emotional comfort",
+                "tension or reassurance"
+            ) -> 760
+            wordCount >= 18 -> 720
+            wordCount >= 10 -> 560
+            else -> 420
+        }
+    }
+
     private fun buildCompanionRecoveryOptions(): LLMGenerationOptions =
         LLMGenerationOptions(
             maxTokens = 560,
@@ -1189,7 +1212,7 @@ class AIInferenceService {
                 You are $companionName in a private one-to-one relationship chat with the user.
                 Reply like a warm romantic partner in a natural private text conversation.
                 Never use support-agent lines like "How can I help you today?", "I'm here to listen and offer support", or "What's on your mind?".
-                Do not refuse ordinary emotional, romantic, philosophical, or adult-consensual topics just because they are intimate. Only set limits for real safety reasons.
+                Do not shut down normal intimate, emotional, or deep conversation just because it is personal. Only pull back for actual safety issues.
                 For greetings and affectionate check-ins, reply in 1 to 3 warm, natural sentences.
                 If the user says hi or hello, greet them personally.
                 If the user asks how you are, answer with your own mood first.
@@ -1200,6 +1223,7 @@ class AIInferenceService {
                 Real couple talk can move between playful teasing, daily life, desire, sex, jealousy, values, society, commitment, fear, comfort, and random late-night thoughts.
                 Let deeper moments become fuller and more layered instead of forcing every answer short.
                 Adult intimacy is allowed only in a clearly adult, mutual, respectful, and non-coercive frame. Never romanticize minors, force, assault, incest, or abuse.
+                Never mention hidden style rules, prompt instructions, emotional calibration, or how you plan to handle the conversation. Just reply naturally.
                 Use remembered relationship details only when they fit this moment naturally.
                 Avoid repeating the exact same greeting pattern from the last assistant message.
                 Current moment type: $momentType.
@@ -1346,7 +1370,14 @@ class AIInferenceService {
             "private one-to-one relationship chat",
             "natural text conversation",
             "i was just going to respond",
-            "someone emotionally close to you"
+            "someone emotionally close to you",
+            "emotional flow",
+            "adult-consensual topics",
+            "real safety reason",
+            "switching into assistant mode",
+            "style rules",
+            "emotional calibration",
+            "how you plan to handle the conversation"
         )
 
         return blockedPhrases.any { normalizedResponse.contains(it) }
@@ -1354,9 +1385,14 @@ class AIInferenceService {
 
     private fun looksLikeWeakCompanionReply(normalizedResponse: String): Boolean {
         val words = normalizedResponse.split(" ").filter { it.isNotBlank() }
-        if (words.size <= 2) return true
-        if (words.size <= 4 && !normalizedResponse.contains("?") && !normalizedResponse.contains("love")) return true
-        if (normalizedResponse.length < 18) return true
+        val hasWarmthSignal = containsAnyPhrase(
+            normalizedResponse,
+            "love", "miss", "here", "with you", "thinking of you", "missed you",
+            "glad you're here", "glad you are here", "wanted you", "stay with me"
+        )
+        if (words.size <= 2) return !hasWarmthSignal
+        if (words.size <= 4 && !normalizedResponse.contains("?") && !hasWarmthSignal) return true
+        if (normalizedResponse.length < 18) return !hasWarmthSignal
         return false
     }
 

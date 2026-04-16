@@ -1115,7 +1115,7 @@ private fun MessageBubble(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     TinyMetaChip(
-                                        label = response.mode.displayName(),
+                                        label = message.assistantLabel?.takeIf { it.isNotBlank() } ?: response.mode.displayName(),
                                         textColor = AccentOrange,
                                         borderColor = AccentOrange.copy(alpha = 0.28f)
                                     )

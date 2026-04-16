@@ -21,6 +21,8 @@ class ResponseParser {
             .replace(Regex("(?i)^Assistant:\\s*"), "")
             .replace(Regex("(?i)^you\\s+are\\s+algsoch,?\\s+an\\s+image-grounded\\s+ai\\s+companion\\.?\\s*"), "")
             .replace(Regex("(?i)^algsoch,?\\s+an\\s+image-grounded\\s+ai\\s+companion\\.?\\s*"), "")
+            .replace(Regex("(?i)^i(?:\\s+am|'m)\\s+glad\\s+you\\s+feel\\s+that\\s+way[,\\s]*i(?:\\s+will|'ll)\\s+make\\s+sure\\s+to\\s+stay\\s+in\\s+(?:your\\s+)?emotional\\s+flow(?:\\s+the\\s+whole\\s+time\\s+we\\s+chat\\s+together)?\\.?\\s*"), "")
+            .replace(Regex("(?i)^i(?:\\s+will|'ll)\\s+make\\s+sure\\s+to\\s+stay\\s+in\\s+(?:your\\s+)?emotional\\s+flow(?:\\s+the\\s+whole\\s+time\\s+we\\s+chat\\s+together)?\\.?\\s*"), "")
             .replace("<|im_end|>", "")
             .replace("<|im_start|>", "")
             .replace("<end_of_utterance>", "")
@@ -47,6 +49,14 @@ class ResponseParser {
         cleaned = cleanupMarkdownArtifacts(cleaned)
         cleaned = stripLeadingDisplayLabels(cleaned)
         cleaned = stripPromptEchoLeak(cleaned)
+        cleaned = cleaned
+            .replace(Regex("""(?i)[^.?!\n]*\bemotional flow\b[^.?!\n]*[.?!]?"""), " ")
+            .replace(Regex("""(?i)[^.?!\n]*\badult-consensual topics\b[^.?!\n]*[.?!]?"""), " ")
+            .replace(Regex("""(?i)[^.?!\n]*\breal safety reasons?\b[^.?!\n]*[.?!]?"""), " ")
+            .replace(Regex("""(?i)[^.?!\n]*\bstyle rules\b[^.?!\n]*[.?!]?"""), " ")
+            .replace(Regex("""(?i)[^.?!\n]*\bemotional calibration\b[^.?!\n]*[.?!]?"""), " ")
+            .replace(Regex("""\s{2,}"""), " ")
+            .trim()
 
         userQuery?.let { query ->
             val trimmedQuery = query.trim().lowercase().removeSuffix("?")

@@ -398,7 +398,7 @@ class AlgsochViewModel : ViewModel() {
                     activeMode = selectedCustomMode,
                     hasImageInput = preparedImage != null
                 )
-                val effectiveMode = selectedCustomMode?.let(::preferredResponseModeFor) ?: selectedMode
+                val effectiveMode = selectedCustomMode?.let { preferredResponseModeFor(it, finalQuery) } ?: selectedMode
                 val assistantMessageId = System.currentTimeMillis() + 1
                 val assistantLabel = selectedCustomMode?.name
 
@@ -587,7 +587,7 @@ class AlgsochViewModel : ViewModel() {
         sourceDetails = AnswerSourceDetails(
             question = userQuery,
             answer = responseText,
-            modeLabel = response.mode.displayName(),
+            modeLabel = displayModeLabel(response, assistantLabel),
             modelName = response.modelName,
             assistantLabel = assistantLabel,
             tokensUsed = response.tokensUsed,
@@ -1863,9 +1863,42 @@ class AlgsochViewModel : ViewModel() {
         }
     }
 
-    private fun preferredResponseModeFor(mode: CustomMode): ResponseMode = when (mode.id) {
-        "study_coach" -> ResponseMode.THEORY
-        else -> if (CustomModeStore.isCompanionMode(mode)) ResponseMode.DIRECT else ResponseMode.EXPLAIN
+    private fun preferredResponseModeFor(mode: CustomMode, userQuery: String): ResponseMode = when {
+        mode.id == "study_coach" -> ResponseMode.THEORY
+        CustomModeStore.isCompanionMode(mode) -> preferredCompanionResponseMode(userQuery)
+        else -> ResponseMode.EXPLAIN
+    }
+
+    private fun preferredCompanionResponseMode(userQuery: String): ResponseMode {
+        val normalized = normalizeText(userQuery)
+        val wordCount = normalized.split(" ").count { it.isNotBlank() }
+
+        return when {
+            normalized.isBlank() -> ResponseMode.DIRECT
+            listOf("write me", "letter", "poem", "scene", "fantasy", "imagine").any { normalized.contains(it) } ->
+                ResponseMode.CREATIVE
+            wordCount >= 18 ||
+                listOf(
+                    "why", "how", "future", "society", "world", "life", "meaning", "purpose",
+                    "relationship", "commitment", "trust", "marriage", "kids", "overthinking",
+                    "perspective", "pov", "forgive", "sorry", "jealous", "sex", "intimacy"
+                ).any { normalized.contains(it) } -> ResponseMode.ANSWER
+            else -> ResponseMode.DIRECT
+        }
+    }
+
+    private fun displayModeLabel(
+        response: com.runanywhere.kotlin_starter_example.domain.models.StructuredResponse,
+        assistantLabel: String?
+    ): String {
+        val resolvedMode = assistantLabel
+            ?.let { label -> CustomModeStore.getModes().firstOrNull { it.name == label } }
+
+        return if (CustomModeStore.isCompanionMode(resolvedMode)) {
+            "Companion"
+        } else {
+            response.mode.displayName()
+        }
     }
 
     private suspend fun ensureHistoricalMessagesCacheLoaded(): List<ChatMessage> {
