@@ -1950,29 +1950,30 @@ private fun AnnotatedString.Builder.appendWarmHighlight(
     text: String,
     tone: ResponseHighlightTone
 ) {
+    // Enhanced highlighting: Blue text with adaptive styling, no background
     val style = when (tone) {
         ResponseHighlightTone.SECTION_LABEL -> SpanStyle(
             fontWeight = FontWeight.Bold,
-            color = Color(0xFFFFD7B0),
-            background = AccentOrange.copy(alpha = 0.22f)
+            color = AccentBlue,
+            fontSize = 16.sp
         )
 
         ResponseHighlightTone.LEAD_SENTENCE -> SpanStyle(
             fontWeight = FontWeight.SemiBold,
-            color = Color(0xFFFFC28E),
-            background = AccentOrange.copy(alpha = 0.10f)
+            color = AccentBlue.copy(alpha = 0.95f),
+            fontSize = 15.sp
         )
 
         ResponseHighlightTone.KEY_TERM -> SpanStyle(
-            fontWeight = FontWeight.SemiBold,
-            color = Color(0xFFFFB374),
-            background = AccentOrange.copy(alpha = 0.09f)
+            fontWeight = FontWeight.Bold,
+            color = AccentBlue,
+            fontSize = 14.5.sp
         )
 
         ResponseHighlightTone.ANSWER_VALUE -> SpanStyle(
-            fontWeight = FontWeight.Bold,
-            color = Color(0xFFFFE1C3),
-            background = AccentOrange.copy(alpha = 0.18f)
+            fontWeight = FontWeight.ExtraBold,
+            color = AccentBlue,
+            fontSize = 15.sp
         )
     }
 
@@ -1986,12 +1987,19 @@ private fun buildSmartHighlightSpans(text: String): List<SmartHighlightSpan> {
 
     val spans = mutableListOf<SmartHighlightSpan>()
 
+    // Advanced Pattern 1: Answer values with context-aware detection
     smartAnswerValuePattern.findAll(text).forEach { match ->
         val group = match.groups[1] ?: return@forEach
         val rawValue = group.value.trim()
         val cleanedValue = rawValue.trimEnd('.', '!', '?', ',', ';', ':')
         val wordCount = cleanedValue.split(Regex("\\s+")).count { it.isNotBlank() }
-        if (cleanedValue.length in 1..32 && wordCount <= 6) {
+        
+        // Enhanced: Check if value is emphasized or important
+        val isEmphatic = cleanedValue.any { it.isUpperCase() } || cleanedValue.contains(Regex("""\d+"""))
+        val lengthCheck = if (isEmphatic) 1..50 else 1..32
+        val wordLimit = if (isEmphatic) 8 else 6
+        
+        if (cleanedValue.length in lengthCheck && wordCount <= wordLimit) {
             val offset = group.value.indexOf(cleanedValue)
             val start = group.range.first + maxOf(0, offset)
             val end = start + cleanedValue.length
@@ -1999,34 +2007,84 @@ private fun buildSmartHighlightSpans(text: String): List<SmartHighlightSpan> {
         }
     }
 
+    // Advanced Pattern 2: Callout detection with tone escalation
     smartCalloutPattern.findAll(text).forEach { match ->
         val group = match.groups[2] ?: return@forEach
+        val calloutText = group.value.trim()
+        
+        // Escalate to ANSWER_VALUE if it looks like a key callout
+        val tone = if (calloutText.length > 15 || calloutText.contains(Regex("""[!?]"""))) {
+            ResponseHighlightTone.ANSWER_VALUE
+        } else {
+            ResponseHighlightTone.SECTION_LABEL
+        }
+        
         spans.addNonOverlapping(
             SmartHighlightSpan(
                 start = group.range.first,
                 end = group.range.last + 1,
-                tone = ResponseHighlightTone.SECTION_LABEL
+                tone = tone
             )
         )
     }
 
+    // Advanced Pattern 3: Enhanced definition head detection with semantic analysis
     smartDefinitionHeadPattern.findAll(text).forEach { match ->
         val group = match.groups[2] ?: return@forEach
         val rawCandidate = group.value.trim()
         val cleanedCandidate = rawCandidate.replace(Regex("""^(?i)(?:a|an|the)\s+"""), "").trim()
         val normalized = cleanedCandidate.lowercase(Locale.ROOT)
         val wordCount = cleanedCandidate.split(Regex("\\s+")).count { it.isNotBlank() }
-        if (
-            cleanedCandidate.length in 2..28 &&
-            wordCount <= 4 &&
-            normalized !in genericHighlightStopWords &&
-            "answer" !in normalized &&
-            "result" !in normalized
-        ) {
+        
+        // Advanced filtering with contextual awareness
+        val isValidDefinition = cleanedCandidate.length in 2..28 &&
+                wordCount <= 4 &&
+                normalized !in genericHighlightStopWords &&
+                "answer" !in normalized &&
+                "result" !in normalized &&
+                !normalized.contains(Regex("""^\d+""")) // Don't highlight pure numbers
+        
+        if (isValidDefinition) {
             val offset = rawCandidate.indexOf(cleanedCandidate)
             val start = group.range.first + maxOf(0, offset)
             val end = start + cleanedCandidate.length
             spans.addNonOverlapping(SmartHighlightSpan(start, end, ResponseHighlightTone.KEY_TERM))
+        }
+    }
+
+    // Advanced Pattern 4: Technical term detection (NEW)
+    val technicalTermPattern = Regex(
+        """(?i)\b(?:API|JSON|XML|HTTP|URL|CSS|HTML|SQL|CPU|RAM|GPU|CLI|GUI|UI|UX|SDK|IDE|REST|GraphQL|WebSocket|OAuth|JWT|SSL|TLS|CDN|DNS|VPN|IoT|AI|ML|NLP|LLM|GPU|CUDA|VRAM|SSD|HDD|VPS|VM|Container|Docker|Kubernetes|AWS|Azure|GCP|Git|GitHub|GitLab|Linux|Windows|MacOS|Python|JavaScript|TypeScript|Kotlin|Java|React|Angular|Vue|Node|Express|Django|Flask|FastAPI|Spring|Hibernate|Entity|Repository|Service|Controller|Model|View|Route|Middleware|Cache|Queue|Event|Stream|Topic|Partition|Offset|Consumer|Producer|Topic)\b"""
+    )
+    
+    technicalTermPattern.findAll(text).forEach { match ->
+        val term = match.value
+        if (term.length <= 20) {
+            spans.addNonOverlapping(
+                SmartHighlightSpan(
+                    start = match.range.first,
+                    end = match.range.last + 1,
+                    tone = ResponseHighlightTone.KEY_TERM
+                )
+            )
+        }
+    }
+
+    // Advanced Pattern 5: Emphasis patterns (NEW)
+    val emphasisPattern = Regex("""(?:^|\s)((?:very|extremely|significantly|crucial|essential|critical|important|paramount|vital)\s+[\w\s]+?)(?=[,;.!?\n])""", RegexOption.IGNORE_CASE)
+    
+    emphasisPattern.findAll(text).forEach { match ->
+        val group = match.groups[1] ?: return@forEach
+        val emphasisText = group.value.trim()
+        
+        if (emphasisText.isNotBlank()) {
+            spans.addNonOverlapping(
+                SmartHighlightSpan(
+                    start = group.range.first,
+                    end = group.range.last + 1,
+                    tone = ResponseHighlightTone.LEAD_SENTENCE
+                )
+            )
         }
     }
 
