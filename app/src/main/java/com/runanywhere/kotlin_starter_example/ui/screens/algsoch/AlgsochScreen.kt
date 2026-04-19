@@ -33,6 +33,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -43,6 +44,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -1339,12 +1341,11 @@ private fun AssistantResponseContent(
                     val prose = segment.text.trim('\n')
                     if (prose.isNotBlank()) {
                         SelectionContainer {
-                            Text(
-                                text = buildFormattedAssistantText(prose),
-                                color = textColor,
-                                style = textStyle,
-                                modifier = Modifier.fillMaxWidth(),
-                                softWrap = true
+                            HighlightedAssistantText(
+                                text = prose,
+                                textColor = textColor,
+                                textStyle = textStyle,
+                                modifier = Modifier.fillMaxWidth()
                             )
                         }
                     }
@@ -1359,6 +1360,71 @@ private fun AssistantResponseContent(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun HighlightedAssistantText(
+    text: String,
+    textColor: Color,
+    textStyle: TextStyle,
+    modifier: Modifier = Modifier
+) {
+    val annotatedText = remember(text) { buildFormattedAssistantText(text) }
+    val highlightRanges = remember(annotatedText) {
+        annotatedText.getStringAnnotations(
+            tag = "assistant-highlight",
+            start = 0,
+            end = annotatedText.length
+        )
+    }
+    var layoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+
+    Text(
+        text = annotatedText,
+        color = textColor,
+        style = textStyle,
+        modifier = modifier.drawWithContent {
+            drawContent()
+            val layout = layoutResult ?: return@drawWithContent
+            highlightRanges.forEach { range ->
+                drawOrangeUnderline(layout, range.start, range.end)
+            }
+        },
+        softWrap = true,
+        onTextLayout = { layoutResult = it }
+    )
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawOrangeUnderline(
+    layoutResult: TextLayoutResult,
+    start: Int,
+    end: Int
+) {
+    if (start >= end) return
+
+    val underlineColor = Color(0xFFC46A1A)
+    val thickness = 2.dp.toPx()
+    val offsetY = 2.dp.toPx()
+
+    val startLine = layoutResult.getLineForOffset(start)
+    val endLine = layoutResult.getLineForOffset(end - 1)
+
+    for (line in startLine..endLine) {
+        val lineStart = if (line == startLine) start else layoutResult.getLineStart(line)
+        val lineEnd = if (line == endLine) end else layoutResult.getLineEnd(line, visibleEnd = true)
+        if (lineStart >= lineEnd) continue
+
+        val startBox = layoutResult.getBoundingBox(lineStart)
+        val endBox = layoutResult.getBoundingBox(lineEnd - 1)
+        val y = maxOf(startBox.bottom, endBox.bottom) + offsetY
+
+        drawLine(
+            color = underlineColor,
+            start = androidx.compose.ui.geometry.Offset(startBox.left, y),
+            end = androidx.compose.ui.geometry.Offset(endBox.right, y),
+            strokeWidth = thickness
+        )
     }
 }
 
@@ -1950,36 +2016,39 @@ private fun AnnotatedString.Builder.appendWarmHighlight(
     text: String,
     tone: ResponseHighlightTone
 ) {
-    // Enhanced highlighting: Blue text with adaptive styling, no background
+    // Lighter blue text with a darker orange underline, no background.
+    val highlightBlue = Color(0xFF7FC8FF)
     val style = when (tone) {
         ResponseHighlightTone.SECTION_LABEL -> SpanStyle(
-            fontWeight = FontWeight.Bold,
-            color = AccentBlue,
+            fontWeight = FontWeight.SemiBold,
+            color = highlightBlue,
             fontSize = 16.sp
         )
 
         ResponseHighlightTone.LEAD_SENTENCE -> SpanStyle(
             fontWeight = FontWeight.SemiBold,
-            color = AccentBlue.copy(alpha = 0.95f),
+            color = highlightBlue.copy(alpha = 0.95f),
             fontSize = 15.sp
         )
 
         ResponseHighlightTone.KEY_TERM -> SpanStyle(
-            fontWeight = FontWeight.Bold,
-            color = AccentBlue,
+            fontWeight = FontWeight.Medium,
+            color = highlightBlue,
             fontSize = 14.5.sp
         )
 
         ResponseHighlightTone.ANSWER_VALUE -> SpanStyle(
-            fontWeight = FontWeight.ExtraBold,
-            color = AccentBlue,
+            fontWeight = FontWeight.Bold,
+            color = highlightBlue,
             fontSize = 15.sp
         )
     }
 
+    pushStringAnnotation(tag = "assistant-highlight", annotation = tone.name)
     withStyle(style) {
         append(text)
     }
+    pop()
 }
 
 private fun buildSmartHighlightSpans(text: String): List<SmartHighlightSpan> {
@@ -2088,7 +2157,68 @@ private fun buildSmartHighlightSpans(text: String): List<SmartHighlightSpan> {
         }
     }
 
+    if (spans.isEmpty()) {
+        addProseHighlights(text, spans)
+    }
+
     return spans.sortedBy { it.start }
+}
+
+private fun addProseHighlights(text: String, spans: MutableList<SmartHighlightSpan>) {
+    val sentencePattern = Regex("""[^.!?\n]+[.!?]?""")
+    val sentences = sentencePattern.findAll(text).map { it.value.trim() }.filter { it.isNotBlank() }.toList()
+
+    if (sentences.isNotEmpty()) {
+        val firstSentence = sentences.first()
+        if (firstSentence.length in 18..140) {
+            val start = text.indexOf(firstSentence)
+            if (start >= 0) {
+                spans.addNonOverlapping(
+                    SmartHighlightSpan(
+                        start = start,
+                        end = start + firstSentence.length,
+                        tone = ResponseHighlightTone.LEAD_SENTENCE
+                    )
+                )
+            }
+        }
+    }
+
+    val proseCuePatterns = listOf(
+        Regex("""(?i)\b(start with|next|then|finally|for example|for instance|consider|you can|a good way|another way|one simple way|remember)\b"""),
+        Regex("""(?i)\b(greeting|subject line|opening line|closing line|sign off|best regards|kind regards|thank you)\b""")
+    )
+
+    proseCuePatterns.forEach { pattern ->
+        pattern.findAll(text).forEach { match ->
+            val phrase = match.value.trim()
+            if (phrase.length in 4..40) {
+                spans.addNonOverlapping(
+                    SmartHighlightSpan(
+                        start = match.range.first,
+                        end = match.range.last + 1,
+                        tone = if (phrase.length > 18) ResponseHighlightTone.LEAD_SENTENCE else ResponseHighlightTone.KEY_TERM
+                    )
+                )
+            }
+        }
+    }
+
+    if (spans.isEmpty()) {
+        val shortSentence = sentences.firstOrNull { it.length in 12..90 }
+        if (shortSentence != null) {
+            val start = text.indexOf(shortSentence)
+            if (start >= 0) {
+                spans.addNonOverlapping(
+                    SmartHighlightSpan(
+                        start = start,
+                        end = start + shortSentence.length,
+                        tone = ResponseHighlightTone.KEY_TERM
+                    )
+                )
+            }
+        }
+    }
 }
 
 private fun MutableList<SmartHighlightSpan>.addNonOverlapping(span: SmartHighlightSpan) {
