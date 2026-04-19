@@ -2157,68 +2157,7 @@ private fun buildSmartHighlightSpans(text: String): List<SmartHighlightSpan> {
         }
     }
 
-    if (spans.isEmpty()) {
-        addProseHighlights(text, spans)
-    }
-
     return spans.sortedBy { it.start }
-}
-
-private fun addProseHighlights(text: String, spans: MutableList<SmartHighlightSpan>) {
-    val sentencePattern = Regex("""[^.!?\n]+[.!?]?""")
-    val sentences = sentencePattern.findAll(text).map { it.value.trim() }.filter { it.isNotBlank() }.toList()
-
-    if (sentences.isNotEmpty()) {
-        val firstSentence = sentences.first()
-        if (firstSentence.length in 18..140) {
-            val start = text.indexOf(firstSentence)
-            if (start >= 0) {
-                spans.addNonOverlapping(
-                    SmartHighlightSpan(
-                        start = start,
-                        end = start + firstSentence.length,
-                        tone = ResponseHighlightTone.LEAD_SENTENCE
-                    )
-                )
-            }
-        }
-    }
-
-    val proseCuePatterns = listOf(
-        Regex("""(?i)\b(start with|next|then|finally|for example|for instance|consider|you can|a good way|another way|one simple way|remember)\b"""),
-        Regex("""(?i)\b(greeting|subject line|opening line|closing line|sign off|best regards|kind regards|thank you)\b""")
-    )
-
-    proseCuePatterns.forEach { pattern ->
-        pattern.findAll(text).forEach { match ->
-            val phrase = match.value.trim()
-            if (phrase.length in 4..40) {
-                spans.addNonOverlapping(
-                    SmartHighlightSpan(
-                        start = match.range.first,
-                        end = match.range.last + 1,
-                        tone = if (phrase.length > 18) ResponseHighlightTone.LEAD_SENTENCE else ResponseHighlightTone.KEY_TERM
-                    )
-                )
-            }
-        }
-    }
-
-    if (spans.isEmpty()) {
-        val shortSentence = sentences.firstOrNull { it.length in 12..90 }
-        if (shortSentence != null) {
-            val start = text.indexOf(shortSentence)
-            if (start >= 0) {
-                spans.addNonOverlapping(
-                    SmartHighlightSpan(
-                        start = start,
-                        end = start + shortSentence.length,
-                        tone = ResponseHighlightTone.KEY_TERM
-                    )
-                )
-            }
-        }
-    }
 }
 
 private fun MutableList<SmartHighlightSpan>.addNonOverlapping(span: SmartHighlightSpan) {

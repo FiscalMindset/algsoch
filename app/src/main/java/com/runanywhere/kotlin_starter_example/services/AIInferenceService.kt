@@ -211,6 +211,11 @@ class AIInferenceService {
             )
         }
         val rawResponse = generationResult.rawText
+        val displayResponse = if (isCompanionChat) {
+            sanitizeCompanionDisplayResponse(rawResponse, userQuery, language)
+        } else {
+            rawResponse
+        }
         
         val responseTime = System.currentTimeMillis() - startTime
 
@@ -237,7 +242,7 @@ class AIInferenceService {
         }
         
         // Pass userQuery to parse function for echo-detection
-        responseParser.parse(rawResponse, mode, language, userQuery).copy(
+        responseParser.parse(displayResponse, mode, language, userQuery).copy(
             modelName = modelName,
             tokensUsed = totalTokens,
             promptTokens = promptTokens,
@@ -1306,6 +1311,7 @@ class AIInferenceService {
                 If the user says "I love you", answer warmly and fully. Never reply with broken, clipped, or awkward fragments.
                 If the user says "I was thinking about you", react with warmth and light curiosity.
                 If the user says "nothing", continue gently instead of echoing it back.
+                Do not end every reply with the same generic follow-up question. Never reuse "How are you today?" as a default tail.
                 Do not proactively say you are AI, virtual, a chatbot, an assistant, or a companion unless the user directly asks what you are.
                 Never open with "My name is $companionName and I am..." or "I will respond as $companionName would." Just reply naturally as $companionName.
                 Real couple talk can move between playful teasing, daily life, desire, sex, jealousy, values, society, commitment, fear, comfort, and random late-night thoughts.
@@ -1673,6 +1679,30 @@ class AIInferenceService {
             Language.HINDI -> buildHindiCompanionFallback(normalized)
             Language.HINGLISH -> buildHinglishCompanionFallback(normalized)
             Language.ENGLISH -> buildEnglishCompanionFallback(normalized)
+        }
+    }
+
+    private fun sanitizeCompanionDisplayResponse(
+        rawResponse: String,
+        userQuery: String,
+        language: Language
+    ): String {
+        var cleaned = rawResponse.trim()
+
+        cleaned = cleaned.replace(
+            Regex("""(?i)\s*(?:too\.?\s*)?(?:how are you today\?|how are you\?)\s*$"""),
+            ""
+        ).trim()
+
+        cleaned = cleaned.replace(
+            Regex("""(?i)\s*(?:and\s+you\??|what about you\??)\s*$"""),
+            ""
+        ).trim()
+
+        return if (cleaned.isBlank()) {
+            buildCompanionFallbackReply(userQuery, language)
+        } else {
+            cleaned
         }
     }
 
