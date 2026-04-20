@@ -32,7 +32,8 @@ import com.runanywhere.kotlin_starter_example.ui.theme.*
 fun AlgsochModeSelectionScreen(
     onChatSelected: (String?) -> Unit,
     onVoiceSelected: () -> Unit, // Hidden in UI but kept for Nav compatibility
-    onVisionSelected: () -> Unit  // Merged into Chat
+    onVisionSelected: () -> Unit,  // Merged into Chat
+    onAboutSelected: () -> Unit
 ) {
     val context = LocalContext.current
     var showCustomModeDialog by remember { mutableStateOf(false) }
@@ -101,6 +102,18 @@ fun AlgsochModeSelectionScreen(
                         color = AccentBlue,
                         fontWeight = FontWeight.Bold
                     )
+                }
+
+                Spacer(Modifier.weight(1f))
+
+                OutlinedButton(
+                    onClick = onAboutSelected,
+                    shape = RoundedCornerShape(12.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, AccentBlue)
+                ) {
+                    Icon(Icons.Rounded.Person, null, tint = AccentBlue)
+                    Spacer(Modifier.width(8.dp))
+                    Text("About Me", color = AccentBlue)
                 }
             }
 

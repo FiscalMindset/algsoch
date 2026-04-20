@@ -15,6 +15,7 @@ import androidx.navigation.navArgument
 import com.runanywhere.kotlin_starter_example.services.ModelService
 import com.runanywhere.kotlin_starter_example.ui.screens.ChatScreen
 import com.runanywhere.kotlin_starter_example.ui.screens.HomeScreen
+import com.runanywhere.kotlin_starter_example.ui.screens.AboutMeScreen
 import com.runanywhere.kotlin_starter_example.ui.screens.SpeechToTextScreen
 import com.runanywhere.kotlin_starter_example.ui.screens.TextToSpeechScreen
 import com.runanywhere.kotlin_starter_example.ui.screens.ToolCallingScreen
@@ -88,7 +89,8 @@ fun RunAnywhereApp() {
                     navController.navigate(route)
                 },
                 onVoiceSelected = { navController.navigate("voice_pipeline") },
-                onVisionSelected = { navController.navigate("vision") }
+                onVisionSelected = { navController.navigate("vision") },
+                onAboutSelected = { navController.navigate("about_me") }
             )
         }
         
@@ -162,6 +164,12 @@ fun RunAnywhereApp() {
             VisionScreen(
                 onNavigateBack = { navController.popBackStack() },
                 modelService = modelService
+            )
+        }
+
+        composable("about_me") {
+            AboutMeScreen(
+                onNavigateBack = { navController.popBackStack() }
             )
         }
     }
