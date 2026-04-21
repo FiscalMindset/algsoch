@@ -2157,6 +2157,41 @@ private fun buildSmartHighlightSpans(text: String): List<SmartHighlightSpan> {
         }
     }
 
+    // Advanced Pattern 6: Proper noun phrases for factual/history responses (NEW)
+    val properNounPhrasePattern = Regex(
+        """\b(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3}|[A-Z][a-z]+\s+[A-Z]{2,6}|[A-Z]{2,6}\s+[A-Z][a-z]+)\b"""
+    )
+
+    properNounPhrasePattern.findAll(text).forEach { match ->
+        val phrase = match.value.trim()
+        val words = phrase.split(Regex("""\s+""")).filter { it.isNotBlank() }
+        val looksGeneric = phrase.lowercase(Locale.ROOT) in setOf("in short", "bottom line", "key point")
+        if (!looksGeneric && words.size >= 2 && phrase.length in 4..36) {
+            spans.addNonOverlapping(
+                SmartHighlightSpan(
+                    start = match.range.first,
+                    end = match.range.last + 1,
+                    tone = ResponseHighlightTone.KEY_TERM
+                )
+            )
+        }
+    }
+
+    // Advanced Pattern 7: Academic/science domain terms for non-tech explanations (NEW)
+    val academicTermPattern = Regex(
+        """(?i)\b(?:physics|chemistry|biology|engineering|psychology|mathematics|statistics|history|geography|economics|atomic bomb|military project|scientific project|world war|united states|nuclear)\b"""
+    )
+
+    academicTermPattern.findAll(text).forEach { match ->
+        spans.addNonOverlapping(
+            SmartHighlightSpan(
+                start = match.range.first,
+                end = match.range.last + 1,
+                tone = ResponseHighlightTone.KEY_TERM
+            )
+        )
+    }
+
     return spans.sortedBy { it.start }
 }
 
