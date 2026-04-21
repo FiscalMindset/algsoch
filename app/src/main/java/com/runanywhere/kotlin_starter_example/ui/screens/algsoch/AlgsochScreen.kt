@@ -124,15 +124,26 @@ fun AlgsochScreen(
         viewModel.applyLaunchSelection(initialAssistantId)
     }
 
-    LaunchedEffect(viewModel.messages.size, viewModel.isGenerating) {
+    val tailMessage = viewModel.messages.lastOrNull()
+    val streamingTailKey = if (tailMessage?.isPending == true) {
+        "${tailMessage.id}:${tailMessage.text.length}:${tailMessage.generationStatus.orEmpty()}"
+    } else {
+        "idle"
+    }
+
+    LaunchedEffect(viewModel.messages.size, viewModel.isGenerating, streamingTailKey) {
         val targetIndex = when {
             viewModel.isGenerating && viewModel.messages.lastOrNull()?.isPending != true -> viewModel.messages.size
             viewModel.messages.isNotEmpty() -> viewModel.messages.lastIndex
             else -> -1
         }
         if (targetIndex >= 0) {
-            kotlinx.coroutines.delay(80)
-            listState.animateScrollToItem(targetIndex)
+            if (viewModel.messages.lastOrNull()?.isPending == true) {
+                listState.scrollToItem(targetIndex)
+            } else {
+                kotlinx.coroutines.delay(80)
+                listState.animateScrollToItem(targetIndex)
+            }
         }
     }
 
