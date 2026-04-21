@@ -131,13 +131,25 @@ fun AlgsochScreen(
         "idle"
     }
 
-    LaunchedEffect(viewModel.messages.size, viewModel.isGenerating, streamingTailKey) {
+    val shouldAutoFollowBottom by remember {
+        derivedStateOf {
+            val totalItems = listState.layoutInfo.totalItemsCount
+            if (totalItems == 0) {
+                true
+            } else {
+                val lastVisibleIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                lastVisibleIndex >= totalItems - 2
+            }
+        }
+    }
+
+    LaunchedEffect(viewModel.messages.size, viewModel.isGenerating, streamingTailKey, shouldAutoFollowBottom) {
         val targetIndex = when {
             viewModel.isGenerating && viewModel.messages.lastOrNull()?.isPending != true -> viewModel.messages.size
             viewModel.messages.isNotEmpty() -> viewModel.messages.lastIndex
             else -> -1
         }
-        if (targetIndex >= 0) {
+        if (targetIndex >= 0 && shouldAutoFollowBottom) {
             if (viewModel.messages.lastOrNull()?.isPending == true) {
                 listState.scrollToItem(targetIndex)
             } else {
