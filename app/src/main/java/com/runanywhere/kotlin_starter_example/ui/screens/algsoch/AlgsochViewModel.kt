@@ -28,6 +28,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import java.io.File
 import java.time.Instant
 import java.time.LocalDate
@@ -205,6 +207,7 @@ class AlgsochViewModel : ViewModel() {
     private var historicalMessagesCache: List<ChatMessage> = emptyList()
     private var hasHydratedHistoryCache = false
     private var activeAssistantMessageId: Long? = null
+    private var generationStatusTickerJob: Job? = null
     
     // Current session
     var messages by mutableStateOf<List<ChatMessage>>(emptyList())
@@ -418,6 +421,15 @@ class AlgsochViewModel : ViewModel() {
                 val assistantLabel = selectedCustomMode?.name
 
                 appendPendingAssistantMessage(assistantMessageId, assistantLabel)
+
+                updatePendingAssistantGenerationStatus(
+                    assistantMessageId,
+                    if (preparedImage != null) "1/4 Analyzing your image..." else "1/4 Analyzing your question..."
+                )
+                startGenerationStatusTicker(
+                    messageId = assistantMessageId,
+                    hasImageInput = preparedImage != null
+                )
                 
                 val response = aiService.generateAnswer(
                     userQuery = finalQuery,
@@ -435,6 +447,10 @@ class AlgsochViewModel : ViewModel() {
                     },
                     onPartialResponse = { partial ->
                         withContext(Dispatchers.Main.immediate) {
+                            if (partial.isNotBlank()) {
+                                stopGenerationStatusTicker()
+                                updatePendingAssistantGenerationStatus(assistantMessageId, "4/4 Drafting response...")
+                            }
                             updatePendingAssistantMessage(assistantMessageId, partial)
                         }
                     }
@@ -471,6 +487,7 @@ class AlgsochViewModel : ViewModel() {
                     )
                 }
             } finally {
+                stopGenerationStatusTicker()
                 isGenerating = false
                 activeAssistantMessageId = null
                 generationJob = null
@@ -481,6 +498,7 @@ class AlgsochViewModel : ViewModel() {
     fun cancelGeneration() {
         aiService.cancelActiveGeneration()
         generationJob?.cancel()
+        stopGenerationStatusTicker()
         activeAssistantMessageId?.let { pendingId ->
             finalizePendingAssistantMessage(
                 pendingId,
@@ -490,6 +508,39 @@ class AlgsochViewModel : ViewModel() {
         isGenerating = false
         generationJob = null
         activeAssistantMessageId = null
+    }
+
+    private fun startGenerationStatusTicker(messageId: Long, hasImageInput: Boolean) {
+        stopGenerationStatusTicker()
+        generationStatusTickerJob = viewModelScope.launch {
+            val stages = if (hasImageInput) {
+                listOf(
+                    "1/4 Analyzing your image...",
+                    "2/4 Extracting visible details...",
+                    "3/4 Connecting image with your question...",
+                    "4/4 Drafting response..."
+                )
+            } else {
+                listOf(
+                    "1/4 Analyzing your question...",
+                    "2/4 Checking relevant context...",
+                    "3/4 Drafting response...",
+                    "4/4 Finalizing answer..."
+                )
+            }
+
+            var index = 0
+            while (isActive && isGenerating) {
+                updatePendingAssistantGenerationStatus(messageId, stages[index % stages.size])
+                index++
+                delay(1200)
+            }
+        }
+    }
+
+    private fun stopGenerationStatusTicker() {
+        generationStatusTickerJob?.cancel()
+        generationStatusTickerJob = null
     }
     
     private fun autosaveChat() {
@@ -1971,22 +2022,22 @@ class AlgsochViewModel : ViewModel() {
         activeAssistantMessageId = messageId
         messages = messages + ChatMessage(
             id = messageId,
-            text = "Thinking...",
+            text = "Analyzing your question...",
             isUser = false,
             assistantLabel = assistantLabel,
             isPending = true,
-            generationStatus = "Generating..."
+            generationStatus = "Analyzing your question..."
         )
     }
 
     private fun updatePendingAssistantMessage(messageId: Long, partialText: String) {
-        val visibleText = partialText.ifBlank { "Thinking..." }
+        val visibleText = partialText.ifBlank { "Drafting response..." }
         messages = messages.map { message ->
             if (message.id == messageId) {
                 message.copy(
                     text = visibleText,
                     isPending = true,
-                    generationStatus = message.generationStatus ?: "Generating..."
+                    generationStatus = message.generationStatus ?: "Drafting response..."
                 )
             } else {
                 message
@@ -1999,7 +2050,20 @@ class AlgsochViewModel : ViewModel() {
             if (message.id == messageId) {
                 message.copy(
                     isPending = true,
-                    generationStatus = "Improving..."
+                    generationStatus = "Refining answer..."
+                )
+            } else {
+                message
+            }
+        }
+    }
+
+    private fun updatePendingAssistantGenerationStatus(messageId: Long, status: String) {
+        messages = messages.map { message ->
+            if (message.id == messageId) {
+                message.copy(
+                    isPending = true,
+                    generationStatus = status
                 )
             } else {
                 message
@@ -2031,7 +2095,7 @@ class AlgsochViewModel : ViewModel() {
     private fun finalizePendingAssistantMessage(messageId: Long, interruptionNote: String) {
         messages = messages.map { message ->
             if (message.id == messageId) {
-                val existingText = message.text.takeUnless { it == "Thinking..." }.orEmpty().trim()
+                val existingText = message.text.takeUnless { isGenerationPlaceholderText(it) }.orEmpty().trim()
                 val finalText = listOf(existingText, interruptionNote)
                     .filter { it.isNotBlank() }
                     .joinToString("\n\n")
@@ -2045,6 +2109,16 @@ class AlgsochViewModel : ViewModel() {
                 message
             }
         }
+    }
+
+    private fun isGenerationPlaceholderText(text: String): Boolean {
+        return text in setOf(
+            "Analyzing your question...",
+            "Analyzing your image...",
+            "Drafting response...",
+            "Refining answer...",
+            "Working on your answer..."
+        ) || text.matches(Regex("""^\d/\d\s+.+"""))
     }
 
     private fun buildSourceTimelineSteps(source: AnswerSourceDetails): List<ReasoningStep> {

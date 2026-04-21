@@ -23,6 +23,12 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Chat
@@ -1009,7 +1015,62 @@ private fun ThinkingIndicator() {
             ) {
                 CircularProgressIndicator(modifier = Modifier.size(14.dp), color = AccentBlue, strokeWidth = 2.dp)
                 Spacer(Modifier.width(12.dp))
-                Text("Thinking...", color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                Text("Working on your answer...", color = TextMuted, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+@Composable
+private fun GenerationProgressTimeline(status: String) {
+    val stageMatch = remember(status) { Regex("""^(\d+)/(\d+)\s+(.+)$""").find(status) }
+    val current = stageMatch?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 1
+    val total = stageMatch?.groupValues?.getOrNull(2)?.toIntOrNull()?.coerceAtLeast(1) ?: 4
+    val label = stageMatch?.groupValues?.getOrNull(3)?.trim().orEmpty().ifBlank { status }
+
+    val pulseTransition = rememberInfiniteTransition(label = "generation-timeline")
+    val pulseAlpha by pulseTransition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "active-stage-alpha"
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = AccentBlue.copy(alpha = 0.95f)
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            repeat(total) { index ->
+                val step = index + 1
+                val isDone = step < current
+                val isActive = step == current
+                val fill = when {
+                    isDone -> AccentBlue
+                    isActive -> AccentBlue.copy(alpha = pulseAlpha)
+                    else -> AccentBlue.copy(alpha = 0.2f)
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(fill)
+                )
             }
         }
     }
@@ -1215,6 +1276,7 @@ private fun MessageBubble(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    val hasImprovementPass = response.generationTrace.size > 1
                                     TinyMetaChip(
                                         label = message.assistantLabel?.takeIf { it.isNotBlank() } ?: response.mode.displayName(),
                                         textColor = AccentOrange,
@@ -1226,6 +1288,13 @@ private fun MessageBubble(
                                         borderColor = AccentBlue.copy(alpha = 0.28f),
                                         onClick = onSeeHow
                                     )
+                                    if (hasImprovementPass) {
+                                        TinyMetaChip(
+                                            label = "Improved",
+                                            textColor = AccentGreen,
+                                            borderColor = AccentGreen.copy(alpha = 0.28f)
+                                        )
+                                    }
                                     if (response.tokensUsed > 0) {
                                         TinyMetaChip("${response.tokensUsed} tokens")
                                     }
@@ -1265,6 +1334,10 @@ private fun MessageBubble(
                                 Spacer(Modifier.height(16.dp))
                                 HorizontalDivider(color = AccentBlue.copy(alpha = 0.2f), thickness = 1.dp)
                                 Spacer(Modifier.height(10.dp))
+                                GenerationProgressTimeline(
+                                    status = message.generationStatus ?: "1/4 Analyzing your question..."
+                                )
+                                Spacer(Modifier.height(8.dp))
                                 Row(
                                     modifier = Modifier.padding(horizontal = 8.dp),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
