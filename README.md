@@ -5,7 +5,7 @@
 
 > Powered by **[RunAnywhere SDK](https://www.runanywhere.ai/)** - On-Device AI Inference
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.0.5-blue)
 ![Android](https://img.shields.io/badge/android-10%2B-green)
 ![Size](https://img.shields.io/badge/size-~45MB-orange)
 ![License](https://img.shields.io/badge/license-Open%20Source-success)
@@ -130,7 +130,7 @@ Algsoch adapts to your unique learning style with 7 powerful modes:
 
 ### Download
 
-**[Download Algsoch APK (v1.0.4)](https://github.com/FiscalMindset/algsoch/releases)**
+**[Download Algsoch APK (v1.0.5)](https://github.com/FiscalMindset/algsoch/releases)**
 
 All 7 learning modes enabled and ready to use.
 
