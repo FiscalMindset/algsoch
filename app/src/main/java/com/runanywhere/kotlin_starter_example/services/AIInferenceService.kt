@@ -110,13 +110,18 @@ class AIInferenceService {
         }
         generationTrace += GenerationTraceEntry(
             label = when {
+                useVision && isCompanionChat -> "Companion Vision Draft"
                 useVision -> "Vision Draft"
                 useTools -> "Tool Draft"
                 else -> "First Draft"
             },
             text = responseParser.sanitizeForDisplay(generationResult.rawText, userQuery),
             reason = if (useVision || useTools) {
-                "This was the initial generated answer."
+                if (useVision && isCompanionChat) {
+                    "This was the initial generated answer from the companion vision path."
+                } else {
+                    "This was the initial generated answer."
+                }
             } else {
                 "This was the first draft generated for the question."
             },
@@ -232,6 +237,7 @@ class AIInferenceService {
         val modelName = try {
             // Check which model is loaded
             when {
+                useVision && isCompanionChat && RunAnywhere.isVLMModelLoaded -> "SmolVLM Companion Vision"
                 useVision && RunAnywhere.isVLMModelLoaded -> "SmolVLM Vision"
                 useTools -> "SmolLM2 + Tools"
                 RunAnywhere.isLLMModelLoaded() -> "SmolLM2 360M"
@@ -275,12 +281,11 @@ class AIInferenceService {
         val genericQueryGuidance = genericVisionQueryGuidance(effectiveQuery)
         val companionVisionGuidance = if (isCompanion) {
             """
-            This image is being shared inside an ongoing private companion chat.
-            React first to what is actually visible, then answer with warmth and personal presence.
-            If the image looks like a selfie, outfit photo, food photo, room photo, or casual life update, sound like a caring partner noticing the moment.
-            Give compliments only when the visible evidence supports them.
-            Never act clinical, detached, or like a support agent when reacting to a personal image.
-            Do not mention the assistant identity unless the user asks about it directly.
+            Answer like a natural companion reply, not like a system instruction or report.
+            Lead with a simple observation of what is visible, then add one warm personal reaction if it fits.
+            Keep it short, human, and specific.
+            Do not describe the prompt, the chat context, the instructions, or the fact that you are following evidence.
+            Do not mention assistant identity unless the user asks directly.
             """.trimIndent()
         } else {
             ""
@@ -324,10 +329,11 @@ class AIInferenceService {
         val genericQueryGuidance = genericVisionQueryGuidance(effectiveQuery)
         val companionVisionGuidance = if (isCompanion) {
             """
-            This image is being shared inside an ongoing private companion chat.
-            Keep the rewrite warm, emotionally present, and naturally personal after describing what is visible.
-            If the image seems like a personal life update, respond like a caring partner would while staying honest about the visible evidence.
-            Do not mention the assistant identity unless the user asks about it directly.
+            Rewrite as a natural companion reply.
+            Start with what is visibly in the image, then add one warm personal reaction if appropriate.
+            Keep the tone intimate, calm, and specific.
+            Do not mention the prompt, the chat context, the instructions, or the phrase "visible evidence".
+            Do not mention assistant identity unless the user asks about it directly.
             """.trimIndent()
         } else {
             ""

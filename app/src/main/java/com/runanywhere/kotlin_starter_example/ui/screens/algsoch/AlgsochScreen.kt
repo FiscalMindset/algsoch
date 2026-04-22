@@ -1300,6 +1300,7 @@ private fun MessageBubble(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     val hasImprovementPass = response.generationTrace.size > 1
+                                    val usedVision = response.modelName.contains("Vision", ignoreCase = true) || message.imageUri != null
                                     TinyMetaChip(
                                         label = message.assistantLabel?.takeIf { it.isNotBlank() } ?: response.mode.displayName(),
                                         textColor = AccentOrange,
@@ -1311,6 +1312,13 @@ private fun MessageBubble(
                                         borderColor = AccentBlue.copy(alpha = 0.28f),
                                         onClick = onSeeHow
                                     )
+                                    if (usedVision) {
+                                        TinyMetaChip(
+                                            label = "Vision used",
+                                            textColor = AccentGreen,
+                                            borderColor = AccentGreen.copy(alpha = 0.28f)
+                                        )
+                                    }
                                     if (hasImprovementPass) {
                                         TinyMetaChip(
                                             label = "Improved",
