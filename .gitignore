@@ -82,3 +82,6 @@ lint-baseline.xml
 
 # RunAnywhere downloaded models
 app/src/main/assets/models/
+
+# Local internal docs
+COMPANION_MODE_EXPLAINED.md
