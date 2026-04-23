@@ -233,4 +233,16 @@ class TutorReplyGuardTest {
         assertFalse(fallback.contains("Please send it once more"))
         assertTrue(fallback.isNotBlank())
     }
+
+    @Test
+    fun genericFallbackBecomesStudentFriendlyForLearningQuestions() {
+        val fallback = TutorReplyGuard.buildFallbackReply(
+            userQuery = "I am stuck in study phase and nothing is working",
+            rawResponse = "",
+            language = Language.ENGLISH
+        )
+
+        assertTrue(fallback.contains("student answer") || fallback.contains("full question"))
+        assertTrue(fallback.contains("direct answer"))
+    }
 }

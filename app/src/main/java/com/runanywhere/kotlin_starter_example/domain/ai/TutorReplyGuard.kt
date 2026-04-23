@@ -37,13 +37,14 @@ internal object TutorReplyGuard {
         specificFallback(normalizedQuery, language)?.let { return it }
         salvageIncompleteReply(rawResponse)?.let { return it }
         bestEffortFallback(normalizedQuery, language)?.let { return it }
+        learningFallback(normalizedQuery, language)?.let { return it }
 
         return when (language) {
             Language.ENGLISH -> {
                 if (looksLikeMalformedIncompleteReply(rawResponse, normalizedResponse)) {
-                    "That reply got cut off before the answer finished. Ask the same question again and I will answer it cleanly."
+                    "That reply got cut off before the answer finished. Send the same question again or add the missing detail, and I will answer it cleanly."
                 } else {
-                    "That reply drifted away from your question. Ask it once more and I will answer it directly."
+                    "That reply drifted away from your question. Send the exact topic or full question, and I will answer it directly."
                 }
             }
             Language.HINDI -> "Mera previous reply track se bahar chala gaya. Kripya apna sawal ek baar phir bhejiye, main seedha jawab dunga."
@@ -321,6 +322,15 @@ internal object TutorReplyGuard {
     }
 
     private fun bestEffortFallback(normalizedQuery: String, language: Language): String? = when {
+        looksLikeLearningQuestion(normalizedQuery) -> when (language) {
+            Language.ENGLISH ->
+                "I can help with that, but I need the exact topic or full question to give you the best student answer. Paste it here and I’ll start with the direct answer first, then break it down simply."
+            Language.HINDI ->
+                "Main ismein help kar sakta hoon, lekin best student answer dene ke liye exact topic ya poora question chahiye. Yahan bhejiye, main pehle direct answer dunga aur phir simple breakdown karunga."
+            Language.HINGLISH ->
+                "Main ismein help kar sakta hoon, lekin best student answer ke liye exact topic ya poora question chahiye. Yahan bhejo, main pehle direct answer dunga aur phir simple breakdown karunga."
+        }
+
         "game" in normalizedQuery && listOf("use", "build", "create", "making", "creating").any { normalizedQuery.contains(it) } -> when (language) {
             Language.ENGLISH ->
                 "You can use it in game development for gameplay logic, prototypes, AI behaviors, UI flows, testing tools, and asset pipelines. Tell me the exact language or framework if you want a more specific game stack."
@@ -331,6 +341,47 @@ internal object TutorReplyGuard {
         }
 
         else -> null
+    }
+
+    private fun learningFallback(normalizedQuery: String, language: Language): String? = when {
+        looksLikeLearningQuestion(normalizedQuery) -> when (language) {
+            Language.ENGLISH ->
+                "I can help with the student version of this. Send the exact topic or paste the full question, and I’ll give you a direct answer first, then a simple breakdown."
+            Language.HINDI ->
+                "Main iske student version mein help kar sakta hoon. Exact topic ya poora question bhejo, phir main pehle direct answer aur baad mein simple breakdown dunga."
+            Language.HINGLISH ->
+                "Main iske student version mein help kar sakta hoon. Exact topic ya poora question bhejo, phir main pehle direct answer aur baad mein simple breakdown dunga."
+        }
+
+        else -> null
+    }
+
+    private fun looksLikeLearningQuestion(normalizedQuery: String): Boolean {
+        val learningSignals = listOf(
+            "study",
+            "learn",
+            "understand",
+            "explain",
+            "teach",
+            "homework",
+            "assignment",
+            "exam",
+            "school",
+            "college",
+            "student",
+            "class",
+            "lesson",
+            "question",
+            "solve",
+            "how do i",
+            "how to",
+            "what is",
+            "why is",
+            "need help",
+            "stuck"
+        )
+
+        return learningSignals.any { normalizedQuery.contains(it) }
     }
 
     private fun salvageIncompleteReply(rawResponse: String): String? {

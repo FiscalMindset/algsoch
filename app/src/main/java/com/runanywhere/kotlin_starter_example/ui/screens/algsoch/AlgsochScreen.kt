@@ -2296,64 +2296,7 @@ private fun buildSmartHighlightSpans(text: String): List<SmartHighlightSpan> {
         )
     }
 
-    // Universal fallback: for normal prose that does not match special-case patterns,
-    // highlight meaningful phrases and key long terms automatically.
-    buildUniversalFallbackSpans(text).forEach { fallback ->
-        spans.addNonOverlapping(fallback)
-    }
-
     return spans.sortedBy { it.start }
-}
-
-private fun buildUniversalFallbackSpans(text: String): List<SmartHighlightSpan> {
-    if (text.isBlank()) return emptyList()
-
-    val candidates = mutableListOf<Pair<IntRange, Int>>()
-
-    val phrasePattern = Regex(
-        """\b([A-Za-z][A-Za-z'\-]{3,}(?:\s+[A-Za-z][A-Za-z'\-]{3,}){1,2})\b"""
-    )
-
-    phrasePattern.findAll(text).forEach { match ->
-        val phrase = match.groupValues[1].trim()
-        val words = phrase
-            .split(Regex("""\s+"""))
-            .map { it.trim().lowercase(Locale.ROOT) }
-            .filter { it.isNotBlank() }
-
-        if (words.size < 2) return@forEach
-        if (words.all { it in universalHighlightStopWords }) return@forEach
-        if (words.any { it in universalHighlightStopWords }) return@forEach
-
-        val score = words.sumOf { it.length } + 10
-        candidates += (match.range to score)
-    }
-
-    val longWordPattern = Regex("""\b[A-Za-z][A-Za-z'\-]{7,}\b""")
-    longWordPattern.findAll(text).forEach { match ->
-        val token = match.value.lowercase(Locale.ROOT)
-        if (token in universalHighlightStopWords) return@forEach
-        val score = token.length
-        candidates += (match.range to score)
-    }
-
-    if (candidates.isEmpty()) return emptyList()
-
-    return candidates
-        .sortedByDescending { it.second }
-        .map { (range, _) ->
-            SmartHighlightSpan(
-                start = range.first,
-                end = range.last + 1,
-                tone = ResponseHighlightTone.KEY_TERM
-            )
-        }
-        .fold(mutableListOf<SmartHighlightSpan>()) { acc, span ->
-            if (acc.size < 5) {
-                acc.addNonOverlapping(span)
-            }
-            acc
-        }
 }
 
 private fun MutableList<SmartHighlightSpan>.addNonOverlapping(span: SmartHighlightSpan) {
@@ -2418,53 +2361,6 @@ private val genericHighlightStopWords = setOf(
     "the key point",
     "the takeaway",
     "the short answer"
-)
-
-private val universalHighlightStopWords = setOf(
-    "i",
-    "im",
-    "i'm",
-    "you",
-    "we",
-    "they",
-    "he",
-    "she",
-    "it",
-    "this",
-    "that",
-    "these",
-    "those",
-    "is",
-    "are",
-    "was",
-    "were",
-    "be",
-    "been",
-    "being",
-    "have",
-    "has",
-    "had",
-    "do",
-    "does",
-    "did",
-    "for",
-    "from",
-    "with",
-    "without",
-    "into",
-    "about",
-    "through",
-    "really",
-    "kind",
-    "great",
-    "thanks",
-    "asking",
-    "some",
-    "there",
-    "lately",
-    "been",
-    "feel",
-    "like"
 )
 
 private fun formatReadableProseForDisplay(text: String): String {
