@@ -598,50 +598,35 @@ Algsoch is **completely free and open-source**. See [LICENSE](LICENSE) for detai
 
 ---
 
-<footer id="contact" align="center">
-  <hr>
+<div align="center">
 
-  <section>
-    <h2>👨‍💻 Creator &amp; Contact</h2>
+---
 
-    <img src="https://github.com/algsoch.png" alt="Vicky Kumar" width="120" height="120" style="border-radius:50%;border:3px solid #667eea;">
+## 👨‍💻 Creator & Contact
 
-    <h3>Vicky Kumar</h3>
-    <p><strong>Creator of Algsoch</strong> — AI Engineer</p>
+<img src="https://github.com/algsoch.png" alt="Vicky Kumar" width="120" height="120">
 
-    <table role="presentation">
-      <tr>
-        <td align="center">
-          <a href="mailto:npdimagine@gmail.com"><strong>📧 Email</strong></a>
-          <br><small>npdimagine@gmail.com</small>
-        </td>
-        <td align="center">
-          <a href="https://www.github.com/algsoch"><strong>💻 GitHub</strong></a>
-          <br><small>@algsoch</small>
-        </td>
-        <td align="center">
-          <a href="https://www.linkedin.com/in/algsoch"><strong>🔗 LinkedIn</strong></a>
-          <br><small>@algsoch</small>
-        </td>
-      </tr>
-    </table>
-  </section>
+### Vicky Kumar
+**Creator of Algsoch** — AI Engineer
 
-  <hr>
+| | | |
+|---|---|---|
+| <a href="mailto:npdimagine@gmail.com"><strong>📧 Email</strong></a><br>npdimagine@gmail.com | <a href="https://www.github.com/algsoch"><strong>💻 GitHub</strong></a><br>@algsoch | <a href="https://www.linkedin.com/in/algsoch"><strong>🔗 LinkedIn</strong></a><br>@algsoch |
 
-  <blockquote>
-    <p><em>Created with dedication to making education more accessible and intelligent through privacy-first AI.</em></p>
-  </blockquote>
+---
 
-  <hr>
+*Created with dedication to making education more accessible and intelligent through privacy-first AI.*
 
-  <aside style="background:#f0f9ff;border-left:4px solid #667eea;padding:20px;border-radius:6px;text-align:left;">
-    <h4 style="margin-block:0 8px;">⚡ Powered By RunAnywhere SDK</h4>
-    <p>On-device AI inference framework powering Algsoch's intelligence.</p>
-    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;">
-      <a href="https://www.runanywhere.ai/" style="display:inline-block;background:#667eea;color:#fff;padding:8px 20px;border-radius:6px;text-decoration:none;font-weight:600;">🌐 Website</a>
-      <span style="display:inline-block;background:#e0e7ff;color:#667eea;padding:8px 20px;border-radius:6px;font-weight:600;">SDK: 0.16.0-test.39</span>
-      <span style="display:inline-block;background:#e0e7ff;color:#667eea;padding:8px 20px;border-radius:6px;font-weight:600;">License: Open Source</span>
-    </div>
-  </aside>
-</footer>
+---
+
+### ⚡ Powered By RunAnywhere SDK
+
+<div style="background:#f0f9ff;border-left:4px solid #667eea;padding:20px;border-radius:6px;text-align:left;display:inline-block;">
+
+On-device AI inference framework powering Algsoch's intelligence.
+
+[🌐 Website](https://www.runanywhere.ai/) &nbsp;|&nbsp; **SDK:** 0.16.0-test.39 &nbsp;|&nbsp; **License:** Open Source
+
+</div>
+
+</div>
