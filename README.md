@@ -54,10 +54,13 @@ Algsoch is an **advanced AI-powered study companion** built with **RunAnywhere S
   </tr>
 </table>
 
-### Demo
-  <a href="https://youtu.be/8L3svJ2HgI0">
-    <img src="https://img.youtube.com/vi/8L3svJ2HgI0/0.jpg" width="480" alt="Algsoch Demo">
-  </a>
+<div align="center">
+
+| |
+|---|
+| <a href="https://youtu.be/8L3svJ2HgI0"><img src="https://img.youtube.com/vi/8L3svJ2HgI0/0.jpg" width="480" style="border:4px solid #667eea;border-radius:12px;" alt="Algsoch Demo"></a> |
+
+</div>
 
 </details>
 
@@ -658,6 +661,6 @@ On-device AI inference framework that makes Algsoch's intelligence possible — 
 
 <br>
 
-<em>Made with ❤️ — because education should be private, free, and accessible to everyone.</em>
+<em>Made with dedication — because education should be private, free, and accessible to everyone.</em>
 
 </div>
