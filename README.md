@@ -602,31 +602,62 @@ Algsoch is **completely free and open-source**. See [LICENSE](LICENSE) for detai
 
 ---
 
-## 👨‍💻 Creator & Contact
+## 👨‍💻 Created by Vicky Kumar
 
-<img src="https://github.com/algsoch.png" alt="Vicky Kumar" width="120" height="120">
+<div style="display:flex;justify-content:center;gap:20px;flex-wrap:wrap;margin:20px 0;">
 
-### Vicky Kumar
-**Creator of Algsoch** — AI Engineer
+<div style="background:linear-gradient(135deg,#667eea20,#764ba220);border:2px solid #667eea40;border-radius:16px;padding:30px;max-width:360px;">
 
-| | | |
-|---|---|---|
-| <a href="mailto:npdimagine@gmail.com"><strong>📧 Email</strong></a><br>npdimagine@gmail.com | <a href="https://www.github.com/algsoch"><strong>💻 GitHub</strong></a><br>@algsoch | <a href="https://www.linkedin.com/in/algsoch"><strong>🔗 LinkedIn</strong></a><br>@algsoch |
+<img src="https://github.com/FiscalMindset.png" alt="Vicky Kumar" width="130" height="130" style="border-radius:50%;border:4px solid #667eea;">
 
----
+<h3 style="margin:16px 0 4px;">Vicky Kumar</h3>
+<p style="color:#667eea;font-weight:600;margin:0 0 16px;">AI Engineer &amp; Creator of Algsoch</p>
 
-*Created with dedication to making education more accessible and intelligent through privacy-first AI.*
+<p style="font-size:14px;color:#555;margin-bottom:20px;">
+Passionate about building intelligent, privacy-first learning tools that make education accessible to everyone.
+</p>
 
----
+<div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
 
-### ⚡ Powered By RunAnywhere SDK
+<a href="mailto:npdimagine@gmail.com">
+  <img src="https://img.shields.io/badge/📧_Email-npdimagine%40gmail.com-667eea?style=for-the-badge&logo=gmail&logoColor=white" alt="Email">
+</a>
 
-<div style="background:#f0f9ff;border-left:4px solid #667eea;padding:20px;border-radius:6px;text-align:left;display:inline-block;">
+<a href="https://github.com/FiscalMindset">
+  <img src="https://img.shields.io/badge/GitHub-@FiscalMindset-181717?style=for-the-badge&logo=github" alt="GitHub">
+</a>
 
-On-device AI inference framework powering Algsoch's intelligence.
-
-[🌐 Website](https://www.runanywhere.ai/) &nbsp;|&nbsp; **SDK:** 0.16.0-test.39 &nbsp;|&nbsp; **License:** Open Source
+<a href="https://www.linkedin.com/in/FiscalMindset">
+  <img src="https://img.shields.io/badge/LinkedIn-FiscalMindset-0A66C2?style=for-the-badge&logo=linkedin" alt="LinkedIn">
+</a>
 
 </div>
+</div>
+
+<div style="background:linear-gradient(135deg,#f0f9ff,#e0e7ff);border-left:6px solid #667eea;border-radius:12px;padding:24px;max-width:320px;text-align:left;">
+
+<h4 style="margin:0 0 12px;">⚡ Powered By RunAnywhere SDK</h4>
+
+<p style="font-size:14px;color:#444;margin:0 0 16px;">
+On-device AI inference framework that makes Algsoch's intelligence possible — 100% offline, zero cloud dependency.
+</p>
+
+<div style="display:flex;gap:8px;flex-wrap:wrap;">
+
+<a href="https://www.runanywhere.ai/">
+  <img src="https://img.shields.io/badge/🌐-Website-667eea?style=flat-square" alt="Website">
+</a>
+
+<img src="https://img.shields.io/badge/SDK-0.16.0--test.39-64748B?style=flat-square" alt="SDK">
+
+<img src="https://img.shields.io/badge/License-Open_Source-22c55e?style=flat-square" alt="License">
+
+</div>
+</div>
+</div>
+
+<br>
+
+<em>Made with ❤️ — because education should be private, free, and accessible to everyone.</em>
 
 </div>
